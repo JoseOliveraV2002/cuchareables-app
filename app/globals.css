@@ -11,3 +11,103 @@ html, body {
 * {
   box-sizing: border-box;
 }
+
+/* ---------------- Navegación ---------------- */
+:root { --topbar: 52px; }
+.app-brand { font-family: Georgia, Cambria, serif; font-size: 19px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.app-user-mail { font-size: 12px; color: #7A6A57; word-break: break-all; }
+
+.nav-link { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: none; border-radius: 8px; background: none; color: #7A6A57; font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+.nav-link:hover { background: #F3EADA; color: #3A2A1E; }
+.nav-link[aria-current="page"] { background: #F3EADA; color: #7E4620; box-shadow: inset 3px 0 0 #A15C2B; }
+.nav-link:focus-visible, .nav-tab:focus-visible, .menu-btn:focus-visible { outline: 2px solid #A15C2B; outline-offset: 2px; }
+
+/* barra superior (todas las pantallas) */
+.app-top { position: sticky; top: 0; z-index: 30; background: #FFFFFF; border-bottom: 1px solid #E7DCC9; }
+.app-top-inner { display: flex; align-items: center; gap: 12px; height: var(--topbar); padding: 0 16px; }
+.app-top .nav-link { width: auto; font-size: 12.5px; padding: 6px 8px; }
+.app-busy { font-size: 12px; color: #7A6A57; }
+.menu-btn, .app-section, .sidebar, .nav-hotspot, .scrim { display: none; }
+
+/* móvil: barra inferior con las secciones */
+.nav-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; overflow-x: auto; scrollbar-width: none; background: #FFFFFF; border-top: 1px solid #E7DCC9; padding: 6px 2px calc(6px + env(safe-area-inset-bottom, 0px)); }
+.nav-bottom::-webkit-scrollbar { display: none; }
+.nav-tab { flex: 1 0 64px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; border: none; background: none; color: #7A6A57; font: inherit; font-size: 10.5px; font-weight: 600; cursor: pointer; }
+.nav-tab[aria-current="page"] { color: #A15C2B; }
+
+.app-main { max-width: 720px; margin: 0 auto; padding: 14px 16px 96px; }
+
+/* escritorio: la barra lateral está oculta; se abre con el ícono o al acercar el mouse al borde izquierdo */
+@media (min-width: 900px) {
+  .nav-bottom, .solo-movil { display: none; }
+  .menu-btn { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #E7DCC9; border-radius: 8px; background: #FFFFFF; color: #3A2A1E; cursor: pointer; }
+  .menu-btn:hover, .menu-btn[aria-expanded="true"] { background: #F3EADA; }
+  .app-section { display: block; padding-left: 12px; border-left: 1px solid #E7DCC9; font-size: 14px; font-weight: 600; color: #7E4620; }
+
+  .sidebar { display: flex; flex-direction: column; gap: 20px; position: fixed; top: var(--topbar); bottom: 0; left: 0; z-index: 40; width: 236px; padding: 16px 14px; background: #FFFFFF; border-right: 1px solid #E7DCC9; overflow-y: auto; transform: translateX(-100%); visibility: hidden; transition: transform .18s ease, visibility 0s linear .18s; }
+  .sidebar.open { transform: none; visibility: visible; box-shadow: 6px 0 24px rgba(58, 42, 30, .14); transition: transform .18s ease, visibility 0s; }
+  .side-nav { display: flex; flex-direction: column; gap: 2px; }
+  .side-user { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid #E7DCC9; }
+  .side-user .app-user-mail { padding: 0 12px; }
+  .scrim { display: block; position: fixed; top: var(--topbar); left: 0; right: 0; bottom: 0; z-index: 35; background: rgba(58, 42, 30, .18); }
+
+  .app-main { max-width: 960px; padding: 20px 32px 48px; }
+}
+/* zona invisible en el borde izquierdo que abre el menú con el mouse (no existe en pantallas táctiles) */
+@media (min-width: 900px) and (hover: hover) {
+  .nav-hotspot { display: block; position: fixed; top: var(--topbar); bottom: 0; left: 0; width: 10px; z-index: 39; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar.open { transition: none; }
+}
+
+/* ---------------- Inicio de sesión ---------------- */
+.login { min-height: 100vh; display: grid; grid-template-columns: 1fr; }
+.login-brand { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 44px 24px 36px; background: #F5EBE1; color: #5B534D; }
+.login-orb { position: absolute; border-radius: 50%; }
+.login-orb-a { width: 420px; height: 420px; left: -150px; top: -190px; background: #EEE0CF; }
+.login-orb-b { width: 300px; height: 300px; right: -100px; bottom: -150px; background: #E8D7C3; }
+.login-logo { position: relative; width: 168px; height: 168px; border-radius: 50%; box-shadow: 0 14px 34px rgba(91, 83, 77, .20); }
+.login-name { position: relative; font-family: 'Fraunces', Georgia, serif; font-size: 23px; font-weight: 600; text-align: center; }
+.login-panel { display: flex; align-items: center; justify-content: center; padding: 30px 24px 56px; background: #FBF7F1; }
+.login-form { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 18px; }
+.login-title { margin: 0 0 4px; font-family: 'Fraunces', Georgia, serif; font-size: 31px; font-weight: 600; color: #3A2A1E; }
+.login-field { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 600; color: #7A6A57; }
+.login-control { position: relative; display: flex; align-items: center; }
+.login-lead { position: absolute; left: 14px; color: #A89886; pointer-events: none; }
+.login-control input { width: 100%; height: 50px; padding: 0 46px 0 42px; border: 1px solid #E0D3C0; border-radius: 12px; background: #FFFFFF; color: #3A2A1E; font: inherit; font-size: 15px; font-weight: 400; outline: none; transition: border-color .15s, box-shadow .15s; }
+.login-control input:focus { border-color: #A15C2B; box-shadow: 0 0 0 4px rgba(161, 92, 43, .14); }
+.login-eye { position: absolute; right: 6px; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border: none; border-radius: 8px; background: none; color: #A89886; cursor: pointer; }
+.login-eye:hover { color: #7E4620; background: #F3EADA; }
+.login-eye:focus-visible, .login-btn:focus-visible { outline: 2px solid #A15C2B; outline-offset: 2px; }
+.login-error { padding: 10px 12px; border-radius: 10px; background: #F7EAEA; color: #A23E3E; font-size: 13px; }
+.login-btn { height: 50px; margin-top: 4px; border: none; border-radius: 12px; background: #A15C2B; color: #FFFFFF; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.login-btn:hover:not(:disabled) { background: #7E4620; }
+.login-btn:disabled { opacity: .6; cursor: default; }
+@media (min-width: 900px) {
+  .login { grid-template-columns: 1.05fr 1fr; }
+  .login-brand { padding: 48px; gap: 22px; }
+  .login-logo { width: 184px; height: 184px; }
+  .login-name { font-size: 28px; }
+  .login-panel { padding: 48px; }
+}
+
+/* ---------------- Inicio de sesión: estados y enlaces ---------------- */
+.login-text { margin: 0; font-size: 14.5px; line-height: 1.55; color: #6B5B49; }
+.login-text b { color: #3A2A1E; }
+.login-state { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #F7EAEA; color: #A23E3E; }
+.login-ok { padding: 10px 12px; border-radius: 10px; background: #EEF2E9; color: #4A5E40; font-size: 13.5px; }
+.login-link { align-self: center; padding: 6px 8px; border: none; background: none; color: #7E4620; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.login-link:hover { color: #A15C2B; }
+.login-link:focus-visible { outline: 2px solid #A15C2B; outline-offset: 2px; border-radius: 6px; }
+
+/* Campos con error */
+.login-field.invalid { color: #A23E3E; }
+.login-field.invalid .login-control input { border-color: #A23E3E; background: #FFF6F5; box-shadow: 0 0 0 3px rgba(162, 62, 62, .12); }
+.login-msg { font-size: 12.5px; font-weight: 600; color: #A23E3E; }
+.login-reglas { list-style: none; margin: -4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: #7A6A57; }
+.login-reglas li.ok { color: #4A5E40; font-weight: 600; }
+.login-reglas li.mal { color: #A23E3E; font-weight: 600; }
+.reglas-inline { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #7A6A57; }
+.reglas-inline li.ok { color: #4A5E40; font-weight: 600; }
+.reglas-inline li.mal { color: #A23E3E; font-weight: 600; }
