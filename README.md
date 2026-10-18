@@ -78,6 +78,8 @@ SMTP_FROM="Venu <correo@tu-dominio.com>"
 
 - **Planificar producción:** eliges recetas base y cuántas veces las harás; calcula insumos necesarios, lo que falta según el stock y el costo con el precio de la última compra de cada insumo. Se activa por usuario en Usuarios.
 
+- **Filtros y marca:** en Compras se registra la marca (opcional) de cada insumo y se filtra por cuenta de pago y fechas. En Ventas se filtra por cliente, cuenta, estado de pago y fechas. El Panel muestra el mes que elijas.
+
 ## Seguridad
 
 - Consultas SQL siempre parametrizadas; el navegador nunca accede a la base (solo el servidor tiene el token de Turso).

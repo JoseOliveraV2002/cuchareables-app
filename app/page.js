@@ -983,9 +983,8 @@ function Planificador({ data, stock }) {
 
 /* ---------------- DASHBOARD ---------------- */
 function Dashboard({ data, costeo }) {
-  const ahora = new Date();
-  const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-  const ventasMes = data.ventas.filter((v) => new Date(v.fecha) >= inicioMes);
+  const [mes, setMes] = useState(() => hoy().slice(0, 7));
+  const ventasMes = data.ventas.filter((v) => String(v.fecha).startsWith(mes));
   const totalVentasMes = ventasMes.reduce((s, v) => s + (Number(v.total) || 0), 0);
 
   let costoMes = 0;
@@ -1012,6 +1011,10 @@ function Dashboard({ data, costeo }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: C.inkSoft }}>Mes a revisar</span>
+        <Input type="month" value={mes} onChange={(e) => e.target.value && setMes(e.target.value)} style={{ width: 170 }} />
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
         {stats.map((s) => (
           <Card key={s.label} style={{ padding: "12px 10px" }}>
@@ -1024,10 +1027,10 @@ function Dashboard({ data, costeo }) {
       <Card style={{ padding: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
           <TrendingUp size={16} color={C.caramel} />
-          <div style={{ fontWeight: 600, fontSize: 14 }}>Productos más vendidos este mes</div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Productos más vendidos del mes</div>
         </div>
         {ranking.length === 0 ? (
-          <div style={{ fontSize: 13, color: C.inkSoft }}>Aún no hay ventas registradas este mes.</div>
+          <div style={{ fontSize: 13, color: C.inkSoft }}>No hay ventas registradas en este mes.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {ranking.map((r) => (
@@ -1112,7 +1115,11 @@ function ClienteModal({ cliente, onClose, onSave }) {
 function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso }) {
   const [modal, setModal] = useState(null);
   const [modalIng, setModalIng] = useState(null);
-  const ordenadas = data.compras;
+  const [fCuenta, setFCuenta] = useState("todas");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const ordenadas = data.compras.filter((c) => (fCuenta === "todas" || c.cuenta === fCuenta) && (!desde || c.fecha >= desde) && (!hasta || c.fecha <= hasta));
+  const totalFiltrado = ordenadas.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -1127,8 +1134,19 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         </Card>
       )}
 
-      {ordenadas.length === 0 ? (
+      <Card style={{ padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Pagado con"><Select value={fCuenta} onChange={(e) => setFCuenta(e.target.value)}><option value="todas">Todas</option><option value="empresa">Cuenta de la empresa</option><option value="personal">Cuenta personal</option></Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{ordenadas.length} compra(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
+      </Card>
+
+      {data.compras.length === 0 ? (
         <EmptyState icon={ShoppingCart} title="Sin compras registradas" />
+      ) : ordenadas.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ninguna compra coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {ordenadas.map((c) => {
@@ -1138,7 +1156,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
               <Card key={c.id} style={{ padding: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ing ? ing.nombre : "—"}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ing ? ing.nombre : "—"}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
                     <div style={{ fontSize: 12, color: C.inkSoft }}>{c.fecha} · {c.tipoDocumento}{c.numero && ` #${c.numero}`} · {fmtNum(c.cantidad)} {c.unidad}</div>
                     {c.cuenta === "personal" && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
@@ -1206,7 +1224,7 @@ function IngredienteModal({ onClose, onSave }) {
 }
 function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
   const primerIng = data.ingredientes[0];
-  const itemVacio = (ing) => ({ ingredienteId: ing?.id || "", cantidad: "", unidad: ing?.unidad || "g", costoTotal: "", porUnidades: false, unidades: "", contenidoPorUnidad: "" });
+  const itemVacio = (ing) => ({ ingredienteId: ing?.id || "", marca: "", cantidad: "", unidad: ing?.unidad || "g", costoTotal: "", porUnidades: false, unidades: "", contenidoPorUnidad: "" });
   const [f, setF] = useState({
     fecha: hoy(), tipoDocumento: "Boleta", numero: "", cuenta: "empresa",
     items: primerIng ? [itemVacio(primerIng)] : [],
@@ -1265,6 +1283,7 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
                     </div>
                     {f.items.length > 1 && <button aria-label="Quitar insumo" onClick={() => delItem(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, paddingBottom: 8 }}><Trash2 size={16} /></button>}
                   </div>
+                  <Field label="Marca (opcional)" v={v} campo={`items.${idx}.marca`}><Input value={it.marca || ""} onChange={(e) => setItem(idx, { marca: e.target.value })} maxLength={60} placeholder="" /></Field>
 
                   <button
                     onClick={() => setItem(idx, { porUnidades: !it.porUnidades })}
@@ -2489,17 +2508,41 @@ const COLOR_CUENTA = (v) => (v.cuenta === "pendiente" ? C.brick : v.cuenta ? C.s
 function Ventas({ data, session, stock, guardarVenta, eliminarVenta, cambiarCuentaVenta }) {
   const [modal, setModal] = useState(null);
   const [abierta, setAbierta] = useState(null);
+  const [fCliente, setFCliente] = useState("todos");
+  const [fCuenta, setFCuenta] = useState("todas");
+  const [fPago, setFPago] = useState("todos");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const ventasFiltradas = data.ventas.filter((v) =>
+    (fCliente === "todos" || v.clienteId === fCliente) &&
+    (fCuenta === "todas" || v.cuenta === fCuenta) &&
+    (fPago === "todos" || (fPago === "pendiente" ? v.cuenta === "pendiente" : v.cuenta !== "pendiente")) &&
+    (!desde || v.fecha >= desde) && (!hasta || v.fecha <= hasta)
+  );
+  const totalFiltrado = ventasFiltradas.reduce((s, v) => s + (Number(v.total) || 0), 0);
   return (
     <div style={{ paddingTop: 8 }}>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
         <Btn onClick={() => setModal({})} disabled={data.productos.length === 0}><Plus size={15} /> Nueva venta</Btn>
       </div>
       {data.productos.length === 0 && <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10 }}>Crea al menos un producto antes de registrar ventas.</div>}
+      <Card style={{ padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Cliente"><Select value={fCliente} onChange={(e) => setFCliente(e.target.value)}><option value="todos">Todos</option>{data.clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Cuenta"><Select value={fCuenta} onChange={(e) => setFCuenta(e.target.value)}><option value="todas">Todas</option><option value="empresa">Cuenta de la empresa</option><option value="personal">Cuenta personal</option></Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Estado de pago"><Select value={fPago} onChange={(e) => setFPago(e.target.value)}><option value="todos">Todos</option><option value="pagado">Pagado</option><option value="pendiente">Pendiente</option></Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{ventasFiltradas.length} venta(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
+      </Card>
       {data.ventas.length === 0 ? (
         <EmptyState icon={Receipt} title="Sin ventas registradas" />
+      ) : ventasFiltradas.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ninguna venta coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {data.ventas.map((v) => {
+          {ventasFiltradas.map((v) => {
             const cliente = data.clientes.find((c) => c.id === v.clienteId);
             const etiqueta = ETIQUETA_CUENTA(v);
             const tieneFaltante = v.items.some((it) => (it.consumos || []).some((c) => c.tipo === "receta_base" && c.refId == null));
