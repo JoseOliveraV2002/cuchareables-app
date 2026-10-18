@@ -7,7 +7,7 @@ export async function POST(request) {
   if (no) return no;
   const body = await request.json();
   try {
-    await ejecutar(request, "insumo", { hacer: () => saveIngrediente(body) });
+    await ejecutar(request, "insumo", { id: body.id, hacer: () => saveIngrediente(body) });
   } catch (e) {
     return respuestaError(e);
   }

@@ -23,10 +23,10 @@ const C = {
   caramel: "#A15C2B", caramelDark: "#7E4620", sage: "#5F7355", sageBg: "#EEF2E9",
   brick: "#A23E3E", brickBg: "#F7EAEA", chip: "#F3EADA",
 };
-const UNIDADES = ["g", "kg", "ml", "l", "unidad"];
-const FAMILIA = { g: "peso", kg: "peso", ml: "volumen", l: "volumen", unidad: "conteo" };
-const A_BASE = { g: 1, kg: 1000, ml: 1, l: 1000, unidad: 1 };
-const BASE_DE = { peso: "g", volumen: "ml", conteo: "unidad" };
+const UNIDADES = ["g", "kg", "ml", "l", "m", "cm", "unidad"];
+const FAMILIA = { g: "peso", kg: "peso", ml: "volumen", l: "volumen", m: "longitud", cm: "longitud", unidad: "conteo" };
+const A_BASE = { g: 1, kg: 1000, ml: 1, l: 1000, m: 100, cm: 1, unidad: 1 };
+const BASE_DE = { peso: "g", volumen: "ml", longitud: "cm", conteo: "unidad" };
 const TIPOS_DOC = ["Boleta", "Factura", "Guía de despacho", "Otro"];
 const clp = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 2 });
 // Convierte texto escrito con puntos de miles y/o coma decimal (formato peruano) a número real.
@@ -1089,24 +1089,43 @@ function Clientes({ data, guardarCliente, eliminarCliente }) {
           ))}
         </div>
       )}
-      {modal && <ClienteModal cliente={modal} onClose={() => setModal(null)} onSave={async (c) => { await guardarCliente(c); setModal(null); }} />}
+      {modal && <ClienteModal cliente={modal} onClose={() => setModal(null)} onSave={async (c, opts) => { await guardarCliente(c); if (!opts?.seguir) setModal(null); }} />}
     </div>
   );
 }
 function ClienteModal({ cliente, onClose, onSave }) {
-  const [f, setF] = useState({ nombre: "", telefono: "", email: "", direccion: "", notas: "", ...cliente });
+  const vacio = { nombre: "", telefono: "", email: "", direccion: "", notas: "" };
+  const [f, setF] = useState({ ...vacio, ...cliente });
+  const [ultimo, setUltimo] = useState("");
   const v = useValidacion(VAL.validarCliente(f));
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const guardar = (seguir) => v.enviar(async () => {
+    await onSave(f, { seguir });
+    if (seguir) {
+      setUltimo(f.nombre.trim());
+      setF({ ...vacio });
+      v.reiniciar();
+      setTimeout(() => document.getElementById("nuevo-cliente-nombre")?.focus(), 0);
+    }
+  });
   return (
     <Modal title={cliente.id ? "Editar cliente" : "Nuevo cliente"} onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Field label="Nombre" v={v} campo="nombre"><Input value={f.nombre} onChange={set("nombre")} autoFocus maxLength={100} /></Field>
+        {ultimo && <div role="status" style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}><Check size={14} style={{ verticalAlign: "-2px" }} /> Guardado: {ultimo}. Agrega otro cuando quieras.</div>}
+        <Field label="Nombre" v={v} campo="nombre"><Input id="nuevo-cliente-nombre" value={f.nombre} onChange={set("nombre")} autoFocus maxLength={100} /></Field>
         <Field label="Teléfono (opcional)" v={v} campo="telefono"><Input value={f.telefono || ""} onChange={set("telefono")} inputMode="tel" maxLength={25} /></Field>
         <Field label="Email (opcional)" v={v} campo="email"><Input type="email" value={f.email || ""} onChange={set("email")} maxLength={120} /></Field>
         <Field label="Dirección (opcional)" v={v} campo="direccion"><Input value={f.direccion || ""} onChange={set("direccion")} maxLength={200} /></Field>
         <Field label="Notas (opcional)" v={v} campo="notas"><Input value={f.notas || ""} onChange={set("notas")} maxLength={500} /></Field>
         <ErrorForm v={v} />
-        <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(f))} style={{ justifyContent: "center", marginTop: 6 }}>Guardar cliente</Btn>
+        {cliente.id ? (
+          <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ justifyContent: "center", marginTop: 6 }}>Guardar cliente</Btn>
+        ) : (
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <Btn variant="ghost" disabled={v.enviando} onClick={() => guardar(true)} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otro</Btn>
+            <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ flex: 1, justifyContent: "center" }}>Guardar y cerrar</Btn>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -1190,10 +1209,11 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {data.ingredientes.map((ing) => (
               <div key={ing.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-                <span>{ing.nombre}</span>
+                <span>{ing.nombre} <span style={{ color: C.inkSoft }}>· {ing.unidad}</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clp(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
-                  <button onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
+                  <button aria-label={`Editar ${ing.nombre}`} onClick={() => setModalIng(ing)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><Pencil size={13} /></button>
+                  <button aria-label={`Eliminar ${ing.nombre}`} onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
                 </div>
               </div>
             ))}
@@ -1201,23 +1221,50 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         </Card>
       )}
 
-      {modal && <CompraModal data={data} session={session} onClose={() => setModal(null)} onSave={async (c) => { await guardarCompra(c); setModal(null); }} onNuevoIngrediente={() => setModalIng({})} />}
-      {modalIng && <IngredienteModal onClose={() => setModalIng(null)} onSave={async (i) => { await guardarIngrediente(i); setModalIng(null); }} />}
+      {modal && <CompraModal data={data} session={session} onClose={() => setModal(null)} onSave={async (c, opts) => { await guardarCompra(c); if (!opts?.seguir) setModal(null); }} onNuevoIngrediente={() => setModalIng({})} />}
+      {modalIng && <IngredienteModal insumo={modalIng} data={data} onClose={() => setModalIng(null)} onSave={async (i, opts) => { await guardarIngrediente(i); if (!opts?.seguir) setModalIng(null); }} />}
     </div>
   );
 }
-function IngredienteModal({ onClose, onSave }) {
-  const [f, setF] = useState({ nombre: "", unidad: "g" });
+function IngredienteModal({ insumo, data, onClose, onSave }) {
+  const editando = !!(insumo && insumo.id);
+  const [f, setF] = useState(editando ? { id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad } : { nombre: "", unidad: "g" });
+  const [ultimo, setUltimo] = useState("");
+  // Si el insumo ya se usa, la unidad solo puede cambiar dentro de su familia (g<->kg, ml<->l, m<->cm).
+  const enUso = editando && !!data && (
+    data.compras.some((c) => c.ingredienteId === insumo.id) ||
+    data.recetasBase.some((r) => r.ingredientes.some((x) => x.ingredienteId === insumo.id)) ||
+    data.producciones.some((p) => (p.ingredientesUsados || []).some((x) => x.ingredienteId === insumo.id)) ||
+    data.productos.some((p) => (p.componentes || []).some((c) => c.tipo === "ingrediente" && c.refId === insumo.id))
+  );
+  const unidadesOpcion = enUso ? UNIDADES.filter((u) => FAMILIA[u] === FAMILIA[insumo.unidad]) : UNIDADES;
   const v = useValidacion(VAL.validarIngrediente(f));
+  const guardar = (seguir) => v.enviar(async () => {
+    await onSave(f, { seguir });
+    if (seguir) {
+      setUltimo(f.nombre.trim());
+      setF({ nombre: "", unidad: f.unidad }); // la unidad se conserva para el siguiente
+      v.reiniciar();
+      setTimeout(() => document.getElementById("nuevo-insumo-nombre")?.focus(), 0);
+    }
+  });
   return (
-    <Modal title="Nuevo insumo" onClose={onClose}>
+    <Modal title={editando ? "Editar insumo" : "Nuevo insumo"} onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Field label="Nombre" v={v} campo="nombre"><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} autoFocus maxLength={80} /></Field>
+        {ultimo && <div role="status" style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}><Check size={14} style={{ verticalAlign: "-2px" }} /> Guardado: {ultimo}. Agrega otro cuando quieras.</div>}
+        <Field label="Nombre" v={v} campo="nombre"><Input id="nuevo-insumo-nombre" value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} autoFocus maxLength={80} /></Field>
         <Field label="Unidad en que lo compras/usas" v={v} campo="unidad">
-          <Select value={f.unidad} onChange={(e) => setF({ ...f, unidad: e.target.value })}>{UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}</Select>
+          <Select value={f.unidad} onChange={(e) => setF({ ...f, unidad: e.target.value })}>{unidadesOpcion.map((u) => <option key={u} value={u}>{u}</option>)}</Select>
         </Field>
         <ErrorForm v={v} />
-        <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(f))} style={{ justifyContent: "center", marginTop: 6 }}>Guardar insumo</Btn>
+        {editando ? (
+          <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ justifyContent: "center", marginTop: 6 }}>Guardar cambios</Btn>
+        ) : (
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <Btn variant="ghost" disabled={v.enviando} onClick={() => guardar(true)} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otro</Btn>
+            <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ flex: 1, justifyContent: "center" }}>Guardar y cerrar</Btn>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -1241,7 +1288,7 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
   const payload = {
     fecha: f.fecha, tipoDocumento: f.tipoDocumento, numero: f.numero,
     cuenta: f.cuenta, registradoPor: f.cuenta === "personal" ? nombreUsuario : null,
-    items: f.items.map((it) => ({ ingredienteId: it.ingredienteId, unidad: it.unidad, cantidad: cantidadFinal(it), costoTotal: parseNum(it.costoTotal) })),
+    items: f.items.map((it) => ({ ingredienteId: it.ingredienteId, marca: it.marca || null, unidad: it.unidad, cantidad: cantidadFinal(it), costoTotal: parseNum(it.costoTotal) })),
   };
   const v = useValidacion(VAL.validarCompra(payload));
 
@@ -1318,7 +1365,15 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
         )}
 
         <ErrorForm v={v} />
-        <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(payload))} style={{ justifyContent: "center", marginTop: 6 }}>Guardar compra</Btn>
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          <Btn variant="ghost" disabled={v.enviando} onClick={() => v.enviar(async () => {
+            await onSave(payload, { seguir: true });
+            // Conserva fecha, tipo de documento y cuenta; limpia documento y insumos para la siguiente compra.
+            setF({ ...f, numero: "", items: primerIng ? [itemVacio(primerIng)] : [] });
+            v.reiniciar();
+          })} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otra</Btn>
+          <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(payload))} style={{ flex: 1, justifyContent: "center" }}>Guardar compra</Btn>
+        </div>
       </div>
     </Modal>
   );

@@ -80,6 +80,10 @@ SMTP_FROM="Venu <correo@tu-dominio.com>"
 
 - **Filtros y marca:** en Compras se registra la marca (opcional) de cada insumo y se filtra por cuenta de pago y fechas. En Ventas se filtra por cliente, cuenta, estado de pago y fechas. El Panel muestra el mes que elijas.
 
+- **Carga rápida:** al crear insumos, clientes o compras, el botón **Guardar y agregar otro** deja el formulario limpio para el siguiente (la unidad y la fecha se conservan). **Guardar y cerrar** funciona como antes.
+
+- **Editar insumos:** el lápiz junto a cada insumo (en Compras) permite cambiar nombre y unidad. Unidades: g, kg, ml, l, m, cm y unidad. Si el insumo ya tiene compras, recetas, productos o ventas, la unidad solo puede cambiar dentro de su familia (g↔kg, ml↔l, m↔cm).
+
 ## Seguridad
 
 - Consultas SQL siempre parametrizadas; el navegador nunca accede a la base (solo el servidor tiene el token de Turso).
