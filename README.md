@@ -79,6 +79,8 @@ SMTP_FROM="Venu <correo@tu-dominio.com>"
 - **Planificar producción:** eliges recetas base y cuántas veces las harás; calcula insumos necesarios, lo que falta según el stock y el costo con el precio de la última compra de cada insumo. Se activa por usuario en Usuarios.
 
 - **Filtros y marca:** en Compras se registra la marca (opcional) de cada insumo y se filtra por cuenta de pago y fechas. En Ventas se filtra por cliente, cuenta, estado de pago y fechas. El Panel muestra el mes que elijas.
+- **Compras por documento:** las compras se agrupan en un bloque por documento (boleta o factura); al abrirlo se ven sus ítems y se puede "Editar documento" (cambiar datos, corregir o quitar ítems y agregar los que faltaron). Los números se leen con punto o coma como decimal ("0.956" = 0,956).
+- **Foto de boleta o factura:** al registrar una compra (o después, con "Adjuntar foto") se guarda la imagen del documento; se ve, cambia o quita desde cada compra. Se reduce en el navegador y se guarda en la base de datos (Turso), solo visible con sesión y permiso de Compras.
 
 - **Carga rápida:** al crear insumos, clientes o compras, el botón **Guardar y agregar otro** deja el formulario limpio para el siguiente (la unidad y la fecha se conservan). **Guardar y cerrar** funciona como antes.
 

@@ -5,7 +5,7 @@ import {
   Plus, Trash2, Pencil, X, ChevronRight, ChevronLeft, AlertTriangle, TrendingUp, Loader2, Search, LogOut, Layers, CalendarDays, Check, Menu, ArrowDown, ArrowUp, Mail, Lock, Eye, EyeOff, UserCog, KeyRound, Unlock, ShieldCheck, Ban, Copy, RefreshCw, Hash, History, Calculator,
 } from "lucide-react";
 import {
-  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso,
+  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso, actualizarDocumento, subirFoto, asignarFoto, comprimirImagen,
   saveRecetaBase, deleteRecetaBase, saveProduccion, deleteProduccion,
   saveProducto, deleteProducto, saveVenta, deleteVenta, actualizarCuentaVenta, saveAjuste, deleteAjuste,
   savePedido, deletePedido, cambiarPagoPedido,
@@ -29,25 +29,26 @@ const A_BASE = { g: 1, kg: 1000, ml: 1, l: 1000, m: 100, cm: 1, unidad: 1 };
 const BASE_DE = { peso: "g", volumen: "ml", longitud: "cm", conteo: "unidad" };
 const TIPOS_DOC = ["Boleta", "Factura", "Guía de despacho", "Otro"];
 const clp = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 2 });
-// Costos unitarios (por g, ml, kg...): muestra hasta 4 decimales para que S/ 0.0094 no se vea como S/ 0.01.
-const precioUnit = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 4 });
-// Convierte lo que se escribe en un campo numérico a número real.
-//  "0.956" -> 0.956 · "1.5" -> 1.5 · "1.500" -> 1.5 · "0.9560" -> 0.956   (un solo punto = decimal)
-//  "1,5"   -> 1.5   · "1.234,5" -> 1234.5 (coma = decimal, puntos = miles)
-//  "1.234.567" -> 1234567 (varios puntos = miles)
+// Convierte lo escrito a número. Un solo punto o coma es decimal: "0.956" -> 0.956 · "1,5" -> 1.5 · "16352" -> 16352
 const parseNum = (v) => {
   if (typeof v === "number") return v;
   if (v == null || v === "") return 0;
   let s = String(v).trim();
-  if (s.includes(",")) {
-    s = s.replace(/\./g, "").replace(",", ".");
+  if (s.includes(",") && s.includes(".")) {
+    // el último separador es el decimal (1,234.5 -> 1234.5 · 1.234,5 -> 1234.5)
+    const dec = Math.max(s.lastIndexOf(","), s.lastIndexOf("."));
+    s = s.slice(0, dec).replace(/[.,]/g, "") + "." + s.slice(dec + 1);
+  } else if ((s.match(/,/g) || []).length > 1) {
+    s = s.replace(/,/g, ""); // 1,234,567
   } else if ((s.match(/\./g) || []).length > 1) {
-    s = s.replace(/\./g, "");
+    s = s.replace(/\./g, ""); // 1.234.567
+  } else {
+    s = s.replace(",", "."); // un solo separador = decimal ("0.956" y "0,956" valen 0.956)
   }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 };
-const fmtNum = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString("es-CL", { maximumFractionDigits: d });
+const fmtNum = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { maximumFractionDigits: d });
 const toBase = (cantidad, unidad) => (Number(cantidad) || 0) * (A_BASE[unidad] || 1);
 const baseUnidadDe = (unidad) => BASE_DE[FAMILIA[unidad]] || unidad;
 const aFecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -722,11 +723,9 @@ function MainApp({ session, onLogout }) {
     guardarCompra: wrapForm(saveCompra),
     eliminarCompra: conf("¿Eliminar esta compra?", wrap(deleteCompra)),
     marcarReembolso: wrap(marcarReembolso),
-    marcarReembolsoDocumento: wrap(async (ids, valor) => { for (const id of ids) await marcarReembolso(id, valor); }),
-    eliminarDocumentoCompra: async (ids, nombre) => {
-      if (!(await confirmar(`¿Eliminar ${nombre} completo, con sus ${ids.length} insumo(s)?`))) return;
-      return wrap(async () => { for (const id of ids) await deleteCompra(id); })();
-    },
+    asignarFoto: wrapForm(asignarFoto),
+    guardarDocumento: wrapForm(actualizarDocumento),
+    eliminarDocumento: conf("¿Eliminar todas las compras de este documento?", wrap(async (ids) => { for (const id of ids) await deleteCompra(id); })),
     guardarRecetaBase: wrapForm(saveRecetaBase),
     eliminarRecetaBase: conf("¿Eliminar esta receta base? También se eliminarán todos sus lotes.", wrap(deleteRecetaBase)),
     guardarProduccion: wrapForm(saveProduccion),
@@ -970,7 +969,7 @@ function Planificador({ data, stock }) {
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" }}>
                     <span>{p.receta.nombre} × {fmtNum(p.veces)}</span>
                     <span style={{ color: C.inkSoft }}>
-                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${precioUnit(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
+                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${clp(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
                     </span>
                   </div>
                 );
@@ -1135,38 +1134,25 @@ function ClienteModal({ cliente, onClose, onSave }) {
   );
 }
 /* ---------------- COMPRAS ---------------- */
-function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, marcarReembolsoDocumento, eliminarDocumentoCompra }) {
+function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, asignarFoto, guardarDocumento, eliminarDocumento }) {
   const [modal, setModal] = useState(null);
+  const [editDoc, setEditDoc] = useState(null);
+  const [abiertos, setAbiertos] = useState(() => new Set());
+  const [docModal, setDocModal] = useState(null);
   const [modalIng, setModalIng] = useState(null);
   const [fCuenta, setFCuenta] = useState("todas");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [docAbierto, setDocAbierto] = useState(null);
   const ordenadas = data.compras.filter((c) => (fCuenta === "todas" || c.cuenta === fCuenta) && (!desde || c.fecha >= desde) && (!hasta || c.fecha <= hasta));
-  const totalFiltrado = ordenadas.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
-
-  // Un documento (boleta/factura) = una sola tarjeta con todos sus insumos.
-  // Las compras nuevas comparten documentoId; las antiguas se agrupan por fecha + tipo + N° + cuenta (si tienen N°).
-  const documentos = [];
+  // Las compras con el mismo documento (fecha + tipo + número) se agrupan en un bloque.
+  const grupos = [];
   const porClave = new Map();
-  ordenadas.forEach((c) => {
-    const clave = c.documentoId || (c.numero ? [c.fecha, c.tipoDocumento, c.numero, c.cuenta || "", c.registradoPor || ""].join("|") : `solo-${c.id}`);
-    let d = porClave.get(clave);
-    if (!d) {
-      d = { clave, fecha: c.fecha, tipoDocumento: c.tipoDocumento, numero: c.numero, cuenta: c.cuenta, registradoPor: c.registradoPor, items: [] };
-      porClave.set(clave, d);
-      documentos.push(d);
-    }
-    d.items.push(c);
-  });
-  documentos.forEach((d) => {
-    d.total = d.items.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
-    d.pendiente = d.items.some((c) => !c.reembolsado);
-    d.ids = d.items.map((c) => c.id);
-    d.titulo = `${d.tipoDocumento}${d.numero ? ` #${d.numero}` : ""}`;
-  });
-  const nombreInsumo = (c) => data.ingredientes.find((i) => i.id === c.ingredienteId)?.nombre || "—";
-  const docActual = docAbierto ? documentos.find((d) => d.clave === docAbierto) : null;
+  for (const c of ordenadas) {
+    const key = c.numero ? `${c.fecha}|${c.tipoDocumento}|${c.numero}` : c.id;
+    if (!porClave.has(key)) { const g = { key, compras: [] }; porClave.set(key, g); grupos.push(g); }
+    porClave.get(key).compras.push(c);
+  }
+  const totalFiltrado = ordenadas.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -1187,7 +1173,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{documentos.length} documento(s) · {ordenadas.length} insumo(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{grupos.length} documento(s) · {ordenadas.length} ítem(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
       </Card>
 
       {data.compras.length === 0 ? (
@@ -1196,74 +1182,67 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ninguna compra coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {documentos.map((d) => (
-            <Card key={d.clave} style={{ padding: 12, cursor: "pointer" }} onClick={() => setDocAbierto(d.clave)}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{d.titulo}</div>
-                  <div style={{ fontSize: 12, color: C.inkSoft }}>{d.fecha} · {d.items.length} insumo(s)</div>
-                  <div style={{ fontSize: 12, color: C.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {d.items.slice(0, 3).map(nombreInsumo).join(", ")}{d.items.length > 3 ? ` y ${d.items.length - 3} más` : ""}
-                  </div>
-                  {d.cuenta === "personal" && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 600, color: d.pendiente ? C.brick : C.sage }}>
-                        Pagado por {d.registradoPor || "cuenta personal"} — {d.pendiente ? "pendiente de reembolso" : "ya reembolsado"}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); marcarReembolsoDocumento(d.ids, d.pendiente ? 1 : 0); }}
-                        style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}
-                      >
-                        {d.pendiente ? "marcar reembolsado" : "marcar pendiente"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{clp(d.total)}</div>
-                  <ChevronRight size={16} color={C.inkSoft} />
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {docActual && (
-        <Modal title={docActual.titulo} onClose={() => setDocAbierto(null)} wide>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ fontSize: 12.5, color: C.inkSoft }}>
-              {docActual.fecha} · {docActual.items.length} insumo(s) · {docActual.cuenta === "personal" ? `Pagado por ${docActual.registradoPor || "cuenta personal"} (a reembolsar)` : "Cuenta de la empresa"}
-            </div>
-            {docActual.items.map((c) => {
-              const cu = Number(c.cantidad) > 0 ? Number(c.costoTotal) / Number(c.cantidad) : 0;
-              return (
-                <Card key={c.id} style={{ padding: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+          {grupos.map((g) => {
+            const abierto = abiertos.has(g.key);
+            const primera = g.compras[0];
+            const total = g.compras.reduce((t, c) => t + (Number(c.costoTotal) || 0), 0);
+            const conFoto = g.compras.some((c) => c.fotoId);
+            const personal = primera.cuenta === "personal";
+            const pendientes = g.compras.filter((c) => personal && !c.reembolsado).length;
+            return (
+              <Card key={g.key} style={{ padding: 0, overflow: "hidden" }}>
+                <button
+                  onClick={() => setAbiertos((p) => { const n = new Set(p); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; })}
+                  aria-expanded={abierto}
+                  style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", font: "inherit", color: "inherit" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <ChevronRight size={16} style={{ transform: abierto ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{nombreInsumo(c)}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
-                      <div style={{ fontSize: 12, color: C.inkSoft }}>{fmtNum(c.cantidad, 3)} {c.unidad}</div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(c.costoTotal)}</div>
-                      <div style={{ fontSize: 11, color: C.inkSoft }}>{precioUnit(cu)}/{c.unidad}</div>
-                      <button aria-label={`Eliminar ${nombreInsumo(c)} de este documento`} onClick={() => eliminarCompra(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{primera.tipoDocumento}{primera.numero ? ` #${primera.numero}` : " (sin número)"}</div>
+                      <div style={{ fontSize: 12, color: C.inkSoft }}>{primera.fecha} · {g.compras.length} {g.compras.length === 1 ? "ítem" : "ítems"}{personal ? ` · pagado por ${primera.registradoPor || "cuenta personal"}` : ""}</div>
+                      {personal && <div style={{ fontSize: 11.5, fontWeight: 600, color: pendientes ? C.brick : C.sage }}>{pendientes ? `${pendientes} pendiente(s) de reembolso` : "ya reembolsado"}</div>}
                     </div>
                   </div>
-                </Card>
-              );
-            })}
-            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: `1px solid ${C.line}`, paddingTop: 8 }}><span>Total del documento</span><span>{clp(docActual.total)}</span></div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {docActual.cuenta === "personal" && (
-                <Btn variant="ghost" onClick={() => marcarReembolsoDocumento(docActual.ids, docActual.pendiente ? 1 : 0)} style={{ flex: 1, justifyContent: "center" }}>
-                  {docActual.pendiente ? "Marcar todo como reembolsado" : "Marcar todo como pendiente"}
-                </Btn>
-              )}
-              <Btn variant="danger" onClick={async () => { await eliminarDocumentoCompra(docActual.ids, docActual.titulo); }} style={{ flex: 1, justifyContent: "center" }}><Trash2 size={14} /> Eliminar documento</Btn>
-            </div>
-          </div>
-        </Modal>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap" }}>{clp(total)}</div>
+                </button>
+                {abierto && (
+                  <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {g.compras.map((c) => {
+                      const ing = data.ingredientes.find((i) => i.id === c.ingredienteId);
+                      const cu = Number(c.cantidad) > 0 ? Number(c.costoTotal) / Number(c.cantidad) : 0;
+                      return (
+                        <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{ing ? ing.nombre : "—"}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
+                            <div style={{ fontSize: 12, color: C.inkSoft }}>{fmtNum(c.cantidad, 4)} {c.unidad} · {clp(cu)}/{c.unidad}</div>
+                            {c.cuenta === "personal" && (
+                              <button
+                                onClick={() => marcarReembolso(c.id, c.reembolsado ? 0 : 1)}
+                                style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: c.reembolsado ? C.sage : C.brick, marginTop: 3 }}
+                              >
+                                {c.reembolsado ? "reembolsado · marcar pendiente" : "pendiente · marcar reembolsado"}
+                              </button>
+                            )}
+                          </div>
+                          <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(c.costoTotal)}</div>
+                            <button aria-label="Eliminar compra" onClick={() => eliminarCompra(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+                      <Btn variant="ghost" onClick={() => setEditDoc(g.compras)}><Pencil size={13} /> Editar documento</Btn>
+                      <Btn variant="ghost" onClick={() => setDocModal(primera.id)} style={{ color: conFoto ? C.sage : undefined }}>{conFoto ? "Ver documento" : "Adjuntar foto"}</Btn>
+                      <Btn variant="ghost" onClick={() => eliminarDocumento(g.compras.map((c) => c.id))} style={{ color: C.brick }}><Trash2 size={13} /> Eliminar todo</Btn>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
       )}
 
       {data.ingredientes.length > 0 && (
@@ -1274,7 +1253,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
               <div key={ing.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
                 <span>{ing.nombre} <span style={{ color: C.inkSoft }}>· {ing.unidad}</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${precioUnit(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
+                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clp(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
                   <button aria-label={`Editar ${ing.nombre}`} onClick={() => setModalIng(ing)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><Pencil size={13} /></button>
                   <button aria-label={`Eliminar ${ing.nombre}`} onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
                 </div>
@@ -1284,6 +1263,8 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         </Card>
       )}
 
+      {docModal && <DocumentoModal compra={data.compras.find((c) => c.id === docModal)} compras={data.compras} onClose={() => setDocModal(null)} onSave={asignarFoto} />}
+      {editDoc && <CompraModal data={data} session={session} doc={editDoc} onClose={() => setEditDoc(null)} onSave={async (c) => { await guardarDocumento(c); setEditDoc(null); setAbiertos((p) => new Set(p)); }} onNuevoIngrediente={() => setModalIng({})} />}
       {modal && <CompraModal data={data} session={session} onClose={() => setModal(null)} onSave={async (c, opts) => { await guardarCompra(c); if (!opts?.seguir) setModal(null); }} onNuevoIngrediente={() => setModalIng({})} />}
       {modalIng && <IngredienteModal insumo={modalIng} data={data} onClose={() => setModalIng(null)} onSave={async (i, opts) => { await guardarIngrediente(i); if (!opts?.seguir) setModalIng(null); }} />}
     </div>
@@ -1332,14 +1313,29 @@ function IngredienteModal({ insumo, data, onClose, onSave }) {
     </Modal>
   );
 }
-function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
+function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }) {
+  const editando = !!doc;
   const primerIng = data.ingredientes[0];
   const itemVacio = (ing) => ({ ingredienteId: ing?.id || "", marca: "", cantidad: "", unidad: ing?.unidad || "g", costoTotal: "", porUnidades: false, unidades: "", contenidoPorUnidad: "" });
-  const [f, setF] = useState({
+  const [f, setF] = useState(editando ? {
+    fecha: doc[0].fecha, tipoDocumento: doc[0].tipoDocumento, numero: doc[0].numero || "", cuenta: doc[0].cuenta || "empresa",
+    items: doc.map((c) => ({ id: c.id, ingredienteId: c.ingredienteId, marca: c.marca || "", cantidad: String(c.cantidad), unidad: c.unidad, costoTotal: String(c.costoTotal), porUnidades: false, unidades: "", contenidoPorUnidad: "" })),
+  } : {
     fecha: hoy(), tipoDocumento: "Boleta", numero: "", cuenta: "empresa",
     items: primerIng ? [itemVacio(primerIng)] : [],
   });
   const nombreUsuario = session?.nombre || session?.email || "";
+  const [foto, setFoto] = useState(null); // data URL ya reducida
+  const [errFoto, setErrFoto] = useState("");
+  const elegirFoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setErrFoto("");
+    try { setFoto(await comprimirImagen(file)); } catch (er) { setErrFoto(er.message); }
+  };
+  // Sube la foto (si hay) y devuelve los datos de la compra con su id.
+  const conFoto = async () => ({ ...payload, fotoId: foto ? await subirFoto(foto) : null });
 
   const addItem = () => { if (!primerIng) return; setF({ ...f, items: [...f.items, itemVacio(primerIng)] }); };
   const setItem = (idx, patch) => { const arr = [...f.items]; arr[idx] = { ...arr[idx], ...patch }; setF({ ...f, items: arr }); };
@@ -1350,13 +1346,14 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
 
   const payload = {
     fecha: f.fecha, tipoDocumento: f.tipoDocumento, numero: f.numero,
-    cuenta: f.cuenta, registradoPor: f.cuenta === "personal" ? nombreUsuario : null,
-    items: f.items.map((it) => ({ ingredienteId: it.ingredienteId, marca: it.marca || null, unidad: it.unidad, cantidad: cantidadFinal(it), costoTotal: parseNum(it.costoTotal) })),
+    cuenta: f.cuenta, registradoPor: f.cuenta === "personal" ? (editando && doc[0].registradoPor) || nombreUsuario : null,
+    ...(editando ? { ids: doc.map((c) => c.id) } : {}),
+    items: f.items.map((it) => ({ id: it.id, ingredienteId: it.ingredienteId, marca: it.marca || null, unidad: it.unidad, cantidad: cantidadFinal(it), costoTotal: parseNum(it.costoTotal) })),
   };
   const v = useValidacion(VAL.validarCompra(payload));
 
   return (
-    <Modal title="Registrar compra" onClose={onClose} wide>
+    <Modal title={editando ? `Editar documento · ${doc[0].tipoDocumento}${doc[0].numero ? ` #${doc[0].numero}` : ""}` : "Registrar compra"} onClose={onClose} wide>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <Field label="Fecha" v={v} campo="fecha"><Input type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Field>
@@ -1369,6 +1366,18 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
             <option value="personal">Cuenta personal (a reembolsar)</option>
           </Select>
         </Field>
+
+        {!editando && <Field label="Foto de la boleta o factura (opcional)">
+          {foto ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <img src={foto} alt="Vista previa del documento" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.line}` }} />
+              <Btn variant="ghost" onClick={() => setFoto(null)}>Quitar foto</Btn>
+            </div>
+          ) : (
+            <input type="file" accept="image/*" onChange={elegirFoto} aria-label="Foto de la boleta o factura" style={{ fontSize: 13 }} />
+          )}
+          {errFoto && <div style={{ color: C.brick, fontSize: 12, marginTop: 4 }}>{errFoto}</div>}
+        </Field>}
 
         {data.ingredientes.length === 0 ? (
           <div style={{ fontSize: 13, color: C.inkSoft }}>No tienes insumos creados. <button onClick={onNuevoIngrediente} style={{ color: C.caramel, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Crea uno primero</button>.</div>
@@ -1419,7 +1428,7 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
                   {it.porUnidades && cantidadFinal(it) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>= {fmtNum(cantidadFinal(it))} {it.unidad} en total</div>}
 
                   <Field label="Costo total pagado por este insumo" v={v} campo={kCosto}><NumInput value={it.costoTotal} onChange={(e) => setItem(idx, { costoTotal: e.target.value })} /></Field>
-                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {precioUnit(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
+                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {clp(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
                 </div>
               );
             })}
@@ -1429,18 +1438,75 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
 
         <ErrorForm v={v} />
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          {editando ? <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(payload))} style={{ flex: 1, justifyContent: "center" }}>Guardar cambios</Btn> : <>
           <Btn variant="ghost" disabled={v.enviando} onClick={() => v.enviar(async () => {
-            await onSave(payload, { seguir: true });
-            // Conserva fecha, tipo de documento y cuenta; limpia documento y insumos para la siguiente compra.
+            await onSave(await conFoto(), { seguir: true });
+            // Conserva fecha, tipo de documento y cuenta; limpia documento, foto e insumos para la siguiente compra.
             setF({ ...f, numero: "", items: primerIng ? [itemVacio(primerIng)] : [] });
+            setFoto(null);
             v.reiniciar();
           })} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otra</Btn>
-          <Btn disabled={v.enviando} onClick={() => v.enviar(() => onSave(payload))} style={{ flex: 1, justifyContent: "center" }}>Guardar compra</Btn>
+          <Btn disabled={v.enviando} onClick={() => v.enviar(async () => onSave(await conFoto()))} style={{ flex: 1, justifyContent: "center" }}>Guardar compra</Btn></>}
         </div>
       </div>
     </Modal>
   );
 }
+/* Ver, cambiar o quitar la foto de la boleta o factura de una compra. */
+function DocumentoModal({ compra, compras, onClose, onSave }) {
+  const [nueva, setNueva] = useState(null);
+  const [aplicar, setAplicar] = useState(true);
+  const [err, setErr] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const [fallo, setFallo] = useState(false);
+  if (!compra) return null;
+  const hermanas = compra.numero ? compras.filter((x) => x.id !== compra.id && x.fecha === compra.fecha && x.tipoDocumento === compra.tipoDocumento && x.numero === compra.numero).length : 0;
+  const elegir = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setErr("");
+    try { setNueva(await comprimirImagen(file)); } catch (er) { setErr(er.message); }
+  };
+  const guardar = async (fotoId) => {
+    setCargando(true); setErr("");
+    try { await onSave(compra.id, fotoId, aplicar && hermanas > 0); onClose(); } catch (er) { setErr(er.message); } finally { setCargando(false); }
+  };
+  const subirYGuardar = async () => {
+    setCargando(true); setErr("");
+    try { const id = await subirFoto(nueva); await onSave(compra.id, id, aplicar && hermanas > 0); onClose(); } catch (er) { setErr(er.message); } finally { setCargando(false); }
+  };
+  return (
+    <Modal title={`Documento · ${compra.tipoDocumento}${compra.numero ? ` #${compra.numero}` : ""}`} onClose={onClose} wide>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {compra.fotoId && !nueva && (
+          fallo ? <div style={{ fontSize: 13, color: C.brick }}>No se pudo cargar la foto.</div> : (
+            <a href={`/api/fotos?id=${encodeURIComponent(compra.fotoId)}`} target="_blank" rel="noreferrer">
+              <img src={`/api/fotos?id=${encodeURIComponent(compra.fotoId)}`} alt="Boleta o factura" onError={() => setFallo(true)} style={{ width: "100%", maxHeight: "60vh", objectFit: "contain", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff" }} />
+            </a>
+          )
+        )}
+        {nueva && <img src={nueva} alt="Vista previa de la nueva foto" style={{ width: "100%", maxHeight: "60vh", objectFit: "contain", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff" }} />}
+        {!compra.fotoId && !nueva && <div style={{ fontSize: 13, color: C.inkSoft }}>Esta compra aún no tiene foto del documento.</div>}
+        {!nueva && <input type="file" accept="image/*" onChange={elegir} aria-label="Elegir foto del documento" style={{ fontSize: 13 }} />}
+        {hermanas > 0 && (
+          <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="checkbox" checked={aplicar} onChange={(e) => setAplicar(e.target.checked)} />
+            Aplicar también a las otras {hermanas} compra(s) de este mismo documento
+          </label>
+        )}
+        {err && <div style={{ color: C.brick, fontSize: 13 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          {nueva && <Btn disabled={cargando} onClick={subirYGuardar} style={{ flex: 1, justifyContent: "center" }}>Guardar foto</Btn>}
+          {nueva && <Btn variant="ghost" disabled={cargando} onClick={() => setNueva(null)}>Cancelar</Btn>}
+          {compra.fotoId && !nueva && <Btn variant="ghost" disabled={cargando} onClick={() => guardar(null)} style={{ color: C.brick }}>Quitar foto</Btn>}
+          {!nueva && <Btn variant="ghost" onClick={onClose} style={{ flex: 1, justifyContent: "center" }}>Cerrar</Btn>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------------- AJUSTE DE INVENTARIO ---------------- */
 const CATEGORIAS_AJUSTE = ["Merma", "Daño", "Conteo físico", "Otro"];
 
@@ -1817,7 +1883,7 @@ function RecetasBase({ data, costeo, stock, guardarRecetaBase, eliminarRecetaBas
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${precioUnit(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${clp(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); eliminarRecetaBase(r.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={15} /></button>
                     <ChevronRight size={16} color={C.inkSoft} />
@@ -1895,7 +1961,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, marginBottom: 4 }}>{receta.nombre}</div>
-          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? precioUnit(cpu) : "aún sin lotes registrados"}</div>
+          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? clp(cpu) : "aún sin lotes registrados"}</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: stockTotal < 0 ? C.brick : C.sage, marginBottom: 14 }}>Stock total: {fmtNum(stockTotal)} {u}</div>
         </div>
         <button onClick={() => setModalEditar(true)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
@@ -1917,7 +1983,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{l.codigo} <span style={{ fontWeight: 400, color: C.inkSoft }}>· {l.fecha}</span></div>
                     <div style={{ fontSize: 12, color: C.inkSoft }}>Rindió {fmtNum(l.rendimientoReal)} {l.unidadRendimiento} · costo lote {clp(costoLote)}</div>
-                    <div style={{ fontSize: 12, color: C.sage }}>{precioUnit(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
+                    <div style={{ fontSize: 12, color: C.sage }}>{clp(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: stockLote < 0 ? C.brick : C.sage, marginTop: 2 }}>Stock: {fmtNum(stockLote)} {u}</div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
