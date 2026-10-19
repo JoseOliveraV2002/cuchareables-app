@@ -80,6 +80,11 @@ SMTP_FROM="Venu <correo@tu-dominio.com>"
 
 - **Filtros y marca:** en Compras se registra la marca (opcional) de cada insumo y se filtra por cuenta de pago y fechas. En Ventas se filtra por cliente, cuenta, estado de pago y fechas. El Panel muestra el mes que elijas.
 - **Compras por documento:** las compras se agrupan en un bloque por documento (boleta o factura); al abrirlo se ven sus ítems y se puede "Editar documento" (cambiar datos, corregir o quitar ítems y agregar los que faltaron). Los números se leen con punto o coma como decimal ("0.956" = 0,956).
+- **Gastos operativos (OpEx):** en Compras hay dos pestañas: "Insumos de producción" y "Gastos operativos" (mano de obra puntual, servicios, honorarios, transporte...). Los gastos no crean insumos ni tocan stock o costos de recetas, pero restan en la utilidad y en la caja.
+- **Caja mensual con arrastre:** el Panel muestra, para el mes elegido, saldo inicial (el final del mes anterior), cobros, pagos y saldo final. Cuenta solo la cuenta de la empresa, según la fecha de cobro (ventas) y de pago (compras y gastos); lo pagado con dinero personal de un socio sale de la caja cuando se marca como reembolsado. Un "Saldo de apertura" opcional fija con cuánto dinero arrancas.
+- **Fecha del documento vs. fecha de pago:** las compras y gastos tienen "Fecha de pago (si es distinta)"; las ventas, "Fecha en que se cobró". Los resultados usan la fecha del documento y la caja usa la de pago/cobro; las operaciones que cruzan de mes se listan aparte.
+- **Conciliación:** cada mes se puede guardar el saldo real del banco y el sistema muestra si cuadra o la diferencia.
+- **Pareto 80/20:** gráfico y lista de los insumos que concentran el 80% del gasto (por mes o todo el historial).
 - **Foto de boleta o factura:** al registrar una compra (o después, con "Adjuntar foto") se guarda la imagen del documento; se ve, cambia o quita desde cada compra. Se reduce en el navegador y se guarda en la base de datos (Turso), solo visible con sesión y permiso de Compras.
 
 - **Carga rápida:** al crear insumos, clientes o compras, el botón **Guardar y agregar otro** deja el formulario limpio para el siguiente (la unidad y la fecha se conservan). **Guardar y cerrar** funciona como antes.

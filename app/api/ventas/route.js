@@ -20,7 +20,7 @@ export async function PATCH(request) {
   if (no) return no;
   const body = await request.json();
   try {
-    await ejecutar(request, "venta", { id: body.id, hacer: async () => { await actualizarCuentaVenta(body.id, body.cuenta, body.registradoPor); return body.id; } });
+    await ejecutar(request, "venta", { id: body.id, hacer: async () => { await actualizarCuentaVenta(body.id, body.cuenta, body.registradoPor, body.fechaCobro); return body.id; } });
   } catch (e) {
     return respuestaError(e);
   }

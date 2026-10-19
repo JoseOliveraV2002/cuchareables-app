@@ -36,7 +36,7 @@ export async function PATCH(request) {
       id: body.id,
       hacer: async () => {
         if ("fotoId" in body) await asignarFotoCompra(body.id, body.fotoId || null, !!body.aplicarDocumento);
-        else await marcarReembolsoCompra(body.id, body.reembolsado);
+        else await marcarReembolsoCompra(body.id, body.reembolsado, body.fechaReembolso);
         return body.id;
       },
     });

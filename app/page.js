@@ -5,7 +5,7 @@ import {
   Plus, Trash2, Pencil, X, ChevronRight, ChevronLeft, AlertTriangle, TrendingUp, Loader2, Search, LogOut, Layers, CalendarDays, Check, Menu, ArrowDown, ArrowUp, Mail, Lock, Eye, EyeOff, UserCog, KeyRound, Unlock, ShieldCheck, Ban, Copy, RefreshCw, Hash, History, Calculator,
 } from "lucide-react";
 import {
-  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso, actualizarDocumento, subirFoto, asignarFoto, comprimirImagen,
+  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso, actualizarDocumento, saveGasto, deleteGasto, marcarReembolsoGasto, guardarCierre, borrarCierre, guardarApertura, borrarApertura, subirFoto, asignarFoto, comprimirImagen,
   saveRecetaBase, deleteRecetaBase, saveProduccion, deleteProduccion,
   saveProducto, deleteProducto, saveVenta, deleteVenta, actualizarCuentaVenta, saveAjuste, deleteAjuste,
   savePedido, deletePedido, cambiarPagoPedido,
@@ -28,6 +28,8 @@ const FAMILIA = { g: "peso", kg: "peso", ml: "volumen", l: "volumen", m: "longit
 const A_BASE = { g: 1, kg: 1000, ml: 1, l: 1000, m: 100, cm: 1, unidad: 1 };
 const BASE_DE = { peso: "g", volumen: "ml", longitud: "cm", conteo: "unidad" };
 const TIPOS_DOC = ["Boleta", "Factura", "Guía de despacho", "Otro"];
+// Costo por unidad: muestra más decimales cuando es menor a 1 sol (S/ 0.0047 en vez de S/ 0.00).
+const clpU = (n) => { const x = isFinite(n) ? n : 0; const a = Math.abs(x); return x.toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: a >= 1 ? 2 : a >= 0.01 ? 4 : 6 }); };
 const clp = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 2 });
 // Convierte lo escrito a número. Un solo punto o coma es decimal: "0.956" -> 0.956 · "1,5" -> 1.5 · "16352" -> 16352
 const parseNum = (v) => {
@@ -48,14 +50,14 @@ const parseNum = (v) => {
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 };
-const fmtNum = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { maximumFractionDigits: d });
+const fmtNum = (n, d = 4) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { maximumFractionDigits: d });
 const toBase = (cantidad, unidad) => (Number(cantidad) || 0) * (A_BASE[unidad] || 1);
 const baseUnidadDe = (unidad) => BASE_DE[FAMILIA[unidad]] || unidad;
 const aFecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const hoy = () => aFecha(new Date());
 const deFecha = (f) => { const [y, m, d] = f.split("-").map(Number); return new Date(y, m - 1, d); };
 const sumarDias = (f, n) => { const d = deFecha(f); d.setDate(d.getDate() + n); return aFecha(d); };
-const DATA_VACIA = { clientes: [], ingredientes: [], compras: [], recetasBase: [], producciones: [], productos: [], ventas: [], ajustesInventario: [], pedidos: [] };
+const DATA_VACIA = { clientes: [], ingredientes: [], compras: [], recetasBase: [], producciones: [], productos: [], ventas: [], ajustesInventario: [], pedidos: [], gastos: [], cierres: [], cajaConfig: [] };
 
 function useFonts() {
   useEffect(() => {
@@ -199,7 +201,7 @@ function NumInput({ invalid, style, onChange, ...props }) {
   };
   return <input type="text" inputMode="decimal" {...props} onChange={alCambiar} aria-invalid={invalid || undefined} style={{ ...inputStyle, ...(invalid ? estiloInvalido : {}), ...(style || {}) }} />;
 }
-function Select({ invalid, style, ...props }) { return <select {...props} aria-invalid={invalid || undefined} style={{ ...inputStyle, ...(invalid ? estiloInvalido : {}), ...(style || {}) }} />; }
+function Select({ invalid, style, ...props }) { return <select {...props} aria-invalid={invalid || undefined} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%", ...(invalid ? estiloInvalido : {}), ...(style || {}) }} />; }
 const estiloMensaje = { color: C.brick, fontSize: 12, fontWeight: 600 };
 // Mensaje de error de un campo (para los que no van dentro de un <Field>).
 function Err({ v, campo }) {
@@ -215,7 +217,7 @@ function Field({ label, children, v, campo, error }) {
   const msg = error !== undefined ? error : v && campo ? v.msg(campo) : null;
   const hijo = msg && React.isValidElement(children) ? React.cloneElement(children, { invalid: true }) : children;
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }} onBlur={v && campo ? () => v.tocar(campo) : undefined}>
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, minWidth: 0 }} onBlur={v && campo ? () => v.tocar(campo) : undefined}>
       <span style={{ color: C.inkSoft, fontWeight: 600 }}>{label}</span>
       {hijo}
       {msg && <span role="alert" style={estiloMensaje}>{msg}</span>}
@@ -267,7 +269,7 @@ function ErrorForm({ v }) {
 function Modal({ title, onClose, children, wide }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(58,42,30,0.35)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, width: "100%", maxWidth: wide ? 640 : 460, borderRadius: "16px 16px 0 0", padding: 20, maxHeight: "88vh", overflowY: "auto", boxShadow: "0 -8px 30px rgba(0,0,0,0.15)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, width: "100%", maxWidth: wide ? 640 : 460, borderRadius: "16px 16px 0 0", padding: 20, maxHeight: "88vh", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box", boxShadow: "0 -8px 30px rgba(0,0,0,0.15)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, margin: 0 }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><X size={20} /></button>
@@ -722,7 +724,14 @@ function MainApp({ session, onLogout }) {
     eliminarIngrediente: conf("¿Eliminar este insumo?", wrap(deleteIngrediente)),
     guardarCompra: wrapForm(saveCompra),
     eliminarCompra: conf("¿Eliminar esta compra?", wrap(deleteCompra)),
-    marcarReembolso: wrap(marcarReembolso),
+    marcarReembolso: wrap((id, r) => marcarReembolso(id, r, hoy())),
+    guardarGasto: wrapForm(saveGasto),
+    eliminarGasto: conf("¿Eliminar este gasto?", wrap(deleteGasto)),
+    marcarReembolsoGasto: wrap((id, r) => marcarReembolsoGasto(id, r, hoy())),
+    guardarCierre: wrapForm(guardarCierre),
+    borrarCierre: conf("¿Quitar la conciliación de este mes?", wrap(borrarCierre)),
+    guardarApertura: wrapForm(guardarApertura),
+    borrarApertura: conf("¿Quitar el saldo de apertura?", wrap(borrarApertura)),
     asignarFoto: wrapForm(asignarFoto),
     guardarDocumento: wrapForm(actualizarDocumento),
     eliminarDocumento: conf("¿Eliminar todas las compras de este documento?", wrap(async (ids) => { for (const id of ids) await deleteCompra(id); })),
@@ -802,7 +811,7 @@ function MainApp({ session, onLogout }) {
         {error && <div style={{ margin: "0 0 10px", background: C.brickBg, color: C.brick, padding: "8px 12px", borderRadius: 8, fontSize: 13 }}>{error}</div>}
 
         <main>
-          {tab === "dashboard" && <Dashboard data={data} costeo={costeo} />}
+          {tab === "dashboard" && <Dashboard data={data} costeo={costeo} {...actions} />}
           {tab === "clientes" && <Clientes data={data} {...actions} />}
           {tab === "compras" && <Compras data={data} costeo={costeo} session={session} {...actions} />}
           {tab === "stock" && <Stock data={data} costeo={costeo} stock={stock} {...actions} />}
@@ -969,7 +978,7 @@ function Planificador({ data, stock }) {
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" }}>
                     <span>{p.receta.nombre} × {fmtNum(p.veces)}</span>
                     <span style={{ color: C.inkSoft }}>
-                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${clp(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
+                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${clpU(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
                     </span>
                   </div>
                 );
@@ -985,10 +994,258 @@ function Planificador({ data, stock }) {
 }
 
 /* ---------------- DASHBOARD ---------------- */
-function Dashboard({ data, costeo }) {
+/* ---------------- CAJA (criterio de caja) ---------------- */
+const mesDe = (f) => String(f || "").slice(0, 7);
+const finDeMes = (mes) => { const [y, m] = mes.split("-").map(Number); return aFecha(new Date(y, m, 0)); };
+const fmtMes = (mes) => { const [y, m] = mes.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleDateString("es-PE", { month: "long", year: "numeric" }); };
+
+// Movimientos reales de la cuenta de la empresa, con la fecha en que el dinero entró o salió.
+// - Ventas cobradas en la cuenta de la empresa: entran en su fecha de cobro.
+// - Compras y gastos pagados con la cuenta de la empresa: salen en su fecha de pago.
+// - Lo pagado con dinero personal de un socio: sale de la empresa cuando se le reembolsa.
+function movimientosCaja(data) {
+  const out = [];
+  const nombreIng = (id) => data.ingredientes.find((i) => i.id === id)?.nombre || "insumo";
+  data.ventas.forEach((v) => {
+    if (v.cuenta !== "empresa") return;
+    const cli = data.clientes.find((c) => c.id === v.clienteId);
+    out.push({ fecha: v.fechaCobro || v.fecha, doc: v.fecha, tipo: "ingreso", concepto: `Venta${cli ? ` · ${cli.nombre}` : ""}`, monto: Number(v.total) || 0 });
+  });
+  data.compras.forEach((c) => {
+    const monto = Number(c.costoTotal) || 0, pago = c.fechaPago || c.fecha;
+    if (c.cuenta !== "personal") out.push({ fecha: pago, doc: c.fecha, tipo: "egreso", concepto: `Compra · ${nombreIng(c.ingredienteId)}`, monto });
+    else if (c.reembolsado) out.push({ fecha: c.fechaReembolso || pago, doc: c.fecha, tipo: "egreso", concepto: `Reembolso compra · ${nombreIng(c.ingredienteId)}`, monto });
+  });
+  (data.gastos || []).forEach((g) => {
+    const monto = Number(g.monto) || 0, pago = g.fechaPago || g.fecha;
+    if (g.cuenta !== "personal") out.push({ fecha: pago, doc: g.fecha, tipo: "egreso", concepto: `Gasto · ${g.descripcion}`, monto });
+    else if (g.reembolsado) out.push({ fecha: g.fechaReembolso || pago, doc: g.fecha, tipo: "egreso", concepto: `Reembolso gasto · ${g.descripcion}`, monto });
+  });
+  return out;
+}
+// Caja de un mes: saldo inicial (arrastrado del mes anterior), entradas, salidas y saldo final.
+function calcularCaja(data, mes) {
+  const ap = (data.cajaConfig || [])[0] || null;
+  const movs = movimientosCaja(data).filter((m) => !ap || m.fecha >= ap.fecha);
+  const ini = `${mes}-01`, fin = finDeMes(mes);
+  let saldoInicial = ap && ap.fecha <= fin ? Number(ap.monto) || 0 : 0;
+  movs.filter((m) => m.fecha < ini).forEach((m) => { saldoInicial += m.tipo === "ingreso" ? m.monto : -m.monto; });
+  const delMes = movs.filter((m) => m.fecha >= ini && m.fecha <= fin).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const ingresos = delMes.filter((m) => m.tipo === "ingreso").reduce((s, m) => s + m.monto, 0);
+  const egresos = delMes.filter((m) => m.tipo === "egreso").reduce((s, m) => s + m.monto, 0);
+  return { ap, saldoInicial, ingresos, egresos, saldoFinal: saldoInicial + ingresos - egresos, delMes };
+}
+
+function CajaMes({ data, mes, guardarCierre, borrarCierre, guardarApertura, borrarApertura }) {
+  const caja = useMemo(() => calcularCaja(data, mes), [data, mes]);
+  const cierre = (data.cierres || []).find((c) => c.mes === mes);
+  const [saldoBanco, setSaldoBanco] = useState("");
+  const [nota, setNota] = useState("");
+  const [verMov, setVerMov] = useState(false);
+  const [cfg, setCfg] = useState(false);
+  const [apMonto, setApMonto] = useState("");
+  const [apFecha, setApFecha] = useState(hoy());
+  useEffect(() => { setSaldoBanco(cierre ? String(cierre.saldoBanco) : ""); setNota(cierre?.nota || ""); }, [mes, cierre?.saldoBanco, cierre?.nota]);
+  useEffect(() => { if (caja.ap) { setApMonto(String(caja.ap.monto)); setApFecha(caja.ap.fecha); } }, [caja.ap?.monto, caja.ap?.fecha]);
+
+  const valCierre = useValidacion(VAL.validarCierre({ mes, saldoBanco: parseNum(saldoBanco), nota }));
+  const valAp = useValidacion(VAL.validarApertura({ fecha: apFecha, monto: parseNum(apMonto) }));
+  const dif = cierre ? Number(cierre.saldoBanco) - caja.saldoFinal : null;
+
+  // Compras o gastos que cruzan de mes: la fecha del documento y la del pago caen en meses distintos.
+  const cruzan = useMemo(() => {
+    const todos = [];
+    const nombreIng = (id) => data.ingredientes.find((i) => i.id === id)?.nombre || "insumo";
+    data.compras.forEach((c) => { if (c.cuenta !== "personal" && c.fechaPago) todos.push({ doc: c.fecha, pago: c.fechaPago, concepto: `Compra · ${nombreIng(c.ingredienteId)}`, monto: Number(c.costoTotal) || 0 }); });
+    (data.gastos || []).forEach((g) => { if (g.cuenta !== "personal" && g.fechaPago) todos.push({ doc: g.fecha, pago: g.fechaPago, concepto: `Gasto · ${g.descripcion}`, monto: Number(g.monto) || 0 }); });
+    data.ventas.forEach((v) => { if (v.cuenta === "empresa" && v.fechaCobro) todos.push({ doc: v.fecha, pago: v.fechaCobro, concepto: "Venta (cobro)", monto: Number(v.total) || 0 }); });
+    return todos.filter((t) => mesDe(t.doc) !== mesDe(t.pago) && (mesDe(t.doc) === mes || mesDe(t.pago) === mes));
+  }, [data, mes]);
+
+  const porCobrar = data.ventas.filter((v) => v.cuenta === "pendiente").reduce((s, v) => s + (Number(v.total) || 0), 0);
+  const enSocios = data.ventas.filter((v) => v.cuenta === "personal").reduce((s, v) => s + (Number(v.total) || 0), 0);
+  const porReembolsar = data.compras.filter((c) => c.cuenta === "personal" && !c.reembolsado).reduce((s, c) => s + (Number(c.costoTotal) || 0), 0)
+    + (data.gastos || []).filter((g) => g.cuenta === "personal" && !g.reembolsado).reduce((s, g) => s + (Number(g.monto) || 0), 0);
+
+  const fila = (label, valor, color, fuerte) => (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: fuerte ? 700 : 400, padding: "3px 0", borderTop: fuerte ? `1px solid ${C.line}` : "none", marginTop: fuerte ? 4 : 0 }}>
+      <span style={{ color: fuerte ? C.ink : C.inkSoft }}>{label}</span><span style={{ color: color || C.ink }}>{valor}</span>
+    </div>
+  );
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>Caja de {fmtMes(mes)}</div>
+      <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 8 }}>Dinero real de la cuenta de la empresa, según la fecha en que se cobró o se pagó.</div>
+      {fila("Saldo inicial (arrastrado del mes anterior)", clp(caja.saldoInicial))}
+      {fila("+ Cobros del mes", clp(caja.ingresos), C.sage)}
+      {fila("− Pagos del mes (insumos, gastos y reembolsos)", clp(caja.egresos), C.brick)}
+      {fila("Saldo final (pasa como inicial al mes siguiente)", clp(caja.saldoFinal), caja.saldoFinal >= 0 ? C.ink : C.brick, true)}
+
+      <button onClick={() => setVerMov((x) => !x)} style={{ background: "none", border: "none", cursor: "pointer", color: C.caramel, fontWeight: 600, fontSize: 12, padding: 0, marginTop: 8 }}>
+        {verMov ? "Ocultar movimientos" : `Ver los ${caja.delMes.length} movimiento(s) del mes`}
+      </button>
+      {verMov && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+          {caja.delMes.length === 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Sin movimientos de caja este mes.</div>}
+          {caja.delMes.map((m, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
+              <span>{m.fecha} · {m.concepto}{m.doc !== m.fecha ? <span style={{ color: C.inkSoft }}> (documento del {m.doc})</span> : null}</span>
+              <span style={{ color: m.tipo === "ingreso" ? C.sage : C.brick, whiteSpace: "nowrap" }}>{m.tipo === "ingreso" ? "+" : "−"}{clp(m.monto)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {cruzan.length > 0 && (
+        <div style={{ marginTop: 10, background: "#FFF8EC", border: "1px solid #E8CFAE", borderRadius: 8, padding: 10 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>Operaciones que cruzan de mes</div>
+          {cruzan.map((t, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.inkSoft }}>{t.concepto} · {clp(t.monto)}: documento del {t.doc}, {mesDe(t.pago) === mes ? "pagado" : "se paga"} el {t.pago}</div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Conciliar con el banco</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 150 }}><Field label={`Saldo real al cierre de ${fmtMes(mes)}`} v={valCierre} campo="saldoBanco"><NumInput value={saldoBanco} onChange={(e) => setSaldoBanco(e.target.value)} placeholder="0.00" /></Field></div>
+          <div style={{ flex: 1, minWidth: 150 }}><Field label="Nota (opcional)" v={valCierre} campo="nota"><Input value={nota} onChange={(e) => setNota(e.target.value)} maxLength={200} /></Field></div>
+        </div>
+        <ErrorForm v={valCierre} />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <Btn disabled={valCierre.enviando || saldoBanco === ""} onClick={() => valCierre.enviar(() => guardarCierre({ mes, saldoBanco: parseNum(saldoBanco), nota }))}>Guardar conciliación</Btn>
+          {cierre && <Btn variant="ghost" onClick={() => borrarCierre(mes)}>Quitar</Btn>}
+        </div>
+        {cierre && (
+          <div role="status" style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: Math.abs(dif) < 0.005 ? C.sage : C.brick }}>
+            {Math.abs(dif) < 0.005 ? "Cuadra con el banco." : `Diferencia: ${dif > 0 ? "el banco tiene" : "el sistema tiene"} ${clp(Math.abs(dif))} más. Revisa si falta registrar un cobro o un pago, o si alguno tiene la fecha equivocada.`}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}`, fontSize: 12.5, color: C.inkSoft, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div>Por cobrar (ventas pendientes, hoy): <b style={{ color: C.ink }}>{clp(porCobrar)}</b></div>
+        <div>Cobrado en cuentas personales de socios: <b style={{ color: C.ink }}>{clp(enSocios)}</b></div>
+        <div>Por reembolsar a socios (hoy): <b style={{ color: C.ink }}>{clp(porReembolsar)}</b></div>
+      </div>
+
+      <button onClick={() => setCfg((x) => !x)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, fontSize: 12, padding: 0, marginTop: 10 }}>
+        {cfg ? "Ocultar saldo de apertura" : caja.ap ? `Saldo de apertura: ${clp(caja.ap.monto)} desde el ${caja.ap.fecha} (cambiar)` : "Configurar saldo de apertura (dinero que ya había en la cuenta)"}
+      </button>
+      {cfg && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 6 }}>Es el dinero que tenía la cuenta de la empresa el primer día que usas el sistema. Los movimientos anteriores a esa fecha no se cuentan.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140 }}><Field label="Saldo" v={valAp} campo="monto"><NumInput value={apMonto} onChange={(e) => setApMonto(e.target.value)} placeholder="0.00" /></Field></div>
+            <div style={{ flex: 1, minWidth: 140 }}><Field label="Desde el día" v={valAp} campo="fecha"><Input type="date" value={apFecha} onChange={(e) => setApFecha(e.target.value)} /></Field></div>
+          </div>
+          <ErrorForm v={valAp} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn disabled={valAp.enviando || apMonto === ""} onClick={() => valAp.enviar(() => guardarApertura({ monto: parseNum(apMonto), fecha: apFecha }))}>Guardar apertura</Btn>
+            {caja.ap && <Btn variant="ghost" onClick={() => borrarApertura()}>Quitar</Btn>}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ---------------- PARETO DE INSUMOS ---------------- */
+function ParetoInsumos({ data, mes }) {
+  const [alcance, setAlcance] = useState("mes");
+  const filas = useMemo(() => {
+    const por = {};
+    data.compras.forEach((c) => {
+      if (alcance === "mes" && mesDe(c.fecha) !== mes) return;
+      por[c.ingredienteId] = (por[c.ingredienteId] || 0) + (Number(c.costoTotal) || 0);
+    });
+    const lista = Object.entries(por).map(([id, total]) => ({ id, nombre: data.ingredientes.find((i) => i.id === id)?.nombre || "Insumo eliminado", total })).filter((x) => x.total > 0).sort((a, b) => b.total - a.total);
+    const suma = lista.reduce((s, x) => s + x.total, 0);
+    let acum = 0;
+    return { suma, lista: lista.map((x) => { const antes = acum; acum += x.total; return { ...x, pct: suma ? (x.total / suma) * 100 : 0, acum: suma ? (acum / suma) * 100 : 0, claseA: suma ? (antes / suma) * 100 < 80 : false }; }) };
+  }, [data.compras, data.ingredientes, alcance, mes]);
+
+  const { lista, suma } = filas;
+  const nA = lista.filter((x) => x.claseA).length;
+  const MAX = 12;
+  const barras = lista.length > MAX ? [...lista.slice(0, MAX - 1), (() => { const resto = lista.slice(MAX - 1); const total = resto.reduce((s, x) => s + x.total, 0); return { id: "resto", nombre: `Otros ${resto.length} insumos`, total, acum: 100, claseA: false }; })()] : lista;
+  const W = 620, H = 230, L = 46, R = 40, T = 14, B = 26;
+  const pw = W - L - R, ph = H - T - B;
+  const max = Math.max(...barras.map((b) => b.total), 1);
+  const bw = pw / Math.max(barras.length, 1);
+  const x = (i) => L + bw * i + bw / 2;
+  const yv = (v) => T + ph - (v / max) * ph;
+  const yp = (p) => T + ph - (p / 100) * ph;
+  const pts = barras.map((b, i) => `${x(i)},${yp(b.acum)}`).join(" ");
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Pareto 80/20 de insumos</div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["mes", fmtMes(mes)], ["todo", "Todo el historial"]].map(([v, t]) => (
+            <button key={v} aria-pressed={alcance === v} onClick={() => setAlcance(v)} style={{ padding: "4px 10px", borderRadius: 14, fontSize: 12, cursor: "pointer", border: `1px solid ${alcance === v ? C.caramel : C.line}`, background: alcance === v ? C.chip : "#FFFDFA", color: alcance === v ? C.caramelDark : C.inkSoft, fontWeight: 600 }}>{t}</button>
+          ))}
+        </div>
+      </div>
+      {lista.length === 0 ? (
+        <div style={{ fontSize: 13, color: C.inkSoft }}>No hay compras de insumos {alcance === "mes" ? "en este mes" : "registradas"}.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, margin: "6px 0 8px" }}>
+            <b>{nA} de {lista.length}</b> insumo(s) ({Math.round((nA / lista.length) * 100)}%) concentran el <b>{Math.round(lista.filter((x) => x.claseA).slice(-1)[0].acum)}%</b> del gasto de {clp(suma)}. Son los que más conviene negociar, comparar marcas o controlar.
+          </div>
+          <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Gráfico de Pareto: ${nA} de ${lista.length} insumos concentran el 80% del gasto`} style={{ width: "100%", height: "auto" }}>
+            {[0, 25, 50, 75, 100].map((p) => (
+              <g key={p}>
+                <line x1={L} x2={W - R} y1={yp(p)} y2={yp(p)} stroke={C.line} strokeWidth="1" />
+                <text x={W - R + 4} y={yp(p) + 4} fontSize="10" fill={C.inkSoft}>{p}%</text>
+              </g>
+            ))}
+            <text x={L - 6} y={T + 4} fontSize="10" fill={C.inkSoft} textAnchor="end">{clp(max)}</text>
+            <text x={L - 6} y={T + ph + 4} fontSize="10" fill={C.inkSoft} textAnchor="end">0</text>
+            <line x1={L} x2={W - R} y1={yp(80)} y2={yp(80)} stroke={C.brick} strokeWidth="1.2" strokeDasharray="5 4" />
+            {barras.map((b, i) => (
+              <g key={b.id}>
+                <rect x={x(i) - bw * 0.34} y={yv(b.total)} width={bw * 0.68} height={Math.max(ph - (yv(b.total) - T), 0)} rx="3" fill={b.claseA ? C.caramel : "#D9C8AB"}><title>{`${b.nombre}: ${clp(b.total)}`}</title></rect>
+                <text x={x(i)} y={H - 9} fontSize="10.5" fill={C.inkSoft} textAnchor="middle">{i + 1}</text>
+              </g>
+            ))}
+            <polyline points={pts} fill="none" stroke={C.sage} strokeWidth="2" />
+            {barras.map((b, i) => <circle key={b.id} cx={x(i)} cy={yp(b.acum)} r="3.2" fill={C.sage}><title>{`Acumulado hasta ${b.nombre}: ${Math.round(b.acum)}%`}</title></circle>)}
+          </svg>
+          <div style={{ display: "flex", gap: 12, fontSize: 11.5, color: C.inkSoft, flexWrap: "wrap", margin: "2px 0 8px" }}>
+            <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.caramel, borderRadius: 2, marginRight: 4 }} />Insumos que suman el 80%</span>
+            <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#D9C8AB", borderRadius: 2, marginRight: 4 }} />Resto</span>
+            <span><span style={{ display: "inline-block", width: 14, height: 2, background: C.sage, marginRight: 4, verticalAlign: "middle" }} />% acumulado</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {lista.map((r, i) => (
+              <div key={r.id} style={{ display: "flex", gap: 8, fontSize: 12.5, alignItems: "baseline", fontWeight: r.claseA ? 600 : 400, color: r.claseA ? C.ink : C.inkSoft }}>
+                <span style={{ width: 20, color: C.inkSoft }}>{i + 1}.</span>
+                <span style={{ flex: 1 }}>{r.nombre}</span>
+                <span>{clp(r.total)}</span>
+                <span style={{ width: 46, textAlign: "right" }}>{r.pct.toFixed(1)}%</span>
+                <span style={{ width: 70, textAlign: "right", color: C.sage, whiteSpace: "nowrap" }}>{r.acum.toFixed(0)}% acum.</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/* ---------------- PANEL ---------------- */
+function Dashboard({ data, costeo, guardarCierre, borrarCierre, guardarApertura, borrarApertura }) {
   const [mes, setMes] = useState(() => hoy().slice(0, 7));
   const ventasMes = data.ventas.filter((v) => String(v.fecha).startsWith(mes));
   const totalVentasMes = ventasMes.reduce((s, v) => s + (Number(v.total) || 0), 0);
+  const gastosMes = (data.gastos || []).filter((g) => String(g.fecha).startsWith(mes));
+  const totalGastosMes = gastosMes.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  const gastosPorCategoria = {};
+  gastosMes.forEach((g) => { gastosPorCategoria[g.categoria] = (gastosPorCategoria[g.categoria] || 0) + (Number(g.monto) || 0); });
 
   let costoMes = 0;
   const porProducto = {};
@@ -1002,14 +1259,17 @@ function Dashboard({ data, costeo }) {
     });
   });
   const margenMes = totalVentasMes - costoMes;
+  const utilidadMes = margenMes - totalGastosMes;
   const ranking = Object.values(porProducto).sort((a, b) => b.cantidad - a.cantidad).slice(0, 5);
   const maxCant = ranking[0]?.cantidad || 1;
   const productosSinCosto = data.productos.filter((p) => costeo.costoProducto(p).incompleto);
 
   const stats = [
     { label: "Ventas del mes", value: clp(totalVentasMes) },
-    { label: "Costo estimado", value: clp(costoMes) },
+    { label: "Costo estimado de lo vendido", value: clp(costoMes) },
     { label: "Margen del mes", value: clp(margenMes), color: margenMes >= 0 ? C.sage : C.brick },
+    { label: "Gastos operativos", value: clp(totalGastosMes) },
+    { label: "Utilidad neta del mes", value: clp(utilidadMes), color: utilidadMes >= 0 ? C.sage : C.brick },
   ];
 
   return (
@@ -1018,7 +1278,8 @@ function Dashboard({ data, costeo }) {
         <span style={{ fontSize: 13, color: C.inkSoft }}>Mes a revisar</span>
         <Input type="month" value={mes} onChange={(e) => e.target.value && setMes(e.target.value)} style={{ width: 170 }} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+      <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: -6 }}>Resultados del mes (por fecha de venta y de gasto)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
         {stats.map((s) => (
           <Card key={s.label} style={{ padding: "12px 10px" }}>
             <div style={{ fontSize: 11, color: C.inkSoft, marginBottom: 4 }}>{s.label}</div>
@@ -1026,6 +1287,13 @@ function Dashboard({ data, costeo }) {
           </Card>
         ))}
       </div>
+      {Object.keys(gastosPorCategoria).length > 0 && (
+        <div style={{ fontSize: 12.5, color: C.inkSoft }}>Gastos operativos: {Object.entries(gastosPorCategoria).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${clp(v)}`).join(" · ")}</div>
+      )}
+
+      <CajaMes data={data} mes={mes} guardarCierre={guardarCierre} borrarCierre={borrarCierre} guardarApertura={guardarApertura} borrarApertura={borrarApertura} />
+
+      <ParetoInsumos data={data} mes={mes} />
 
       <Card style={{ padding: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -1133,8 +1401,127 @@ function ClienteModal({ cliente, onClose, onSave }) {
     </Modal>
   );
 }
+/* ---------------- COMPRAS: insumos y gastos operativos ---------------- */
+function Compras(props) {
+  const [vista, setVista] = useState("insumos");
+  const pest = (id, texto) => (
+    <button aria-pressed={vista === id} onClick={() => setVista(id)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, fontSize: 13.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${vista === id ? C.caramel : C.line}`, background: vista === id ? C.chip : "#FFFDFA", color: vista === id ? C.caramelDark : C.inkSoft }}>{texto}</button>
+  );
+  return (
+    <div style={{ paddingTop: 8 }}>
+      <div style={{ display: "flex", gap: 8 }}>{pest("insumos", "Insumos de producción")}{pest("gastos", "Gastos operativos")}</div>
+      {vista === "insumos" ? <ComprasInsumos {...props} /> : <Gastos {...props} />}
+    </div>
+  );
+}
+
+function Gastos({ data, session, guardarGasto, eliminarGasto, marcarReembolsoGasto }) {
+  const [modal, setModal] = useState(null);
+  const [fCat, setFCat] = useState("todas");
+  const [fCuenta, setFCuenta] = useState("todas");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const lista = (data.gastos || []).filter((g) => (fCat === "todas" || g.categoria === fCat) && (fCuenta === "todas" || g.cuenta === fCuenta) && (!desde || g.fecha >= desde) && (!hasta || g.fecha <= hasta));
+  const total = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  return (
+    <div style={{ paddingTop: 12 }}>
+      <Card style={{ padding: 12, marginBottom: 12, background: "#FFF8EC", borderColor: "#E8CFAE" }}>
+        <div style={{ fontSize: 12.5 }}>Aquí van los pagos que <b>no son insumos</b>: mano de obra puntual, servicios, honorarios, transporte, etc. No crean insumos, no tocan el stock ni los costos de las recetas, pero sí restan en la utilidad y en la caja.</div>
+      </Card>
+      <Btn onClick={() => setModal({})} style={{ width: "100%", justifyContent: "center", marginBottom: 12 }}><Plus size={15} /> Registrar gasto operativo</Btn>
+
+      <Card style={{ padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Categoría"><Select value={fCat} onChange={(e) => setFCat(e.target.value)}><option value="todas">Todas</option>{VAL.CATEGORIAS_GASTO.map((c) => <option key={c}>{c}</option>)}</Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Pagado con"><Select value={fCuenta} onChange={(e) => setFCuenta(e.target.value)}><option value="todas">Todas</option><option value="empresa">Cuenta de la empresa</option><option value="personal">Cuenta personal</option></Select></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
+          <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{lista.length} gasto(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(total)}</span></div>
+      </Card>
+
+      {(data.gastos || []).length === 0 ? (
+        <EmptyState icon={Receipt} title="Sin gastos operativos registrados" />
+      ) : lista.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ningún gasto coincide con los filtros.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {lista.map((g) => (
+            <Card key={g.id} style={{ padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{g.descripcion}</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft }}>{g.categoria} · {g.fecha}{g.fechaPago && g.fechaPago !== g.fecha ? ` · pagado el ${g.fechaPago}` : ""}</div>
+                  {g.cuenta === "personal" && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: g.reembolsado ? C.sage : C.brick }}>Pagado por {g.registradoPor} — {g.reembolsado ? `reembolsado${g.fechaReembolso ? ` el ${g.fechaReembolso}` : ""}` : "pendiente de reembolso"}</span>
+                      <button onClick={() => marcarReembolsoGasto(g.id, g.reembolsado ? 0 : 1)} style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}>{g.reembolsado ? "marcar pendiente" : "marcar reembolsado"}</button>
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(g.monto)}</div>
+                  <button aria-label={`Editar ${g.descripcion}`} onClick={() => setModal(g)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, marginTop: 2 }}><Pencil size={14} /></button>
+                  <button aria-label={`Eliminar ${g.descripcion}`} onClick={() => eliminarGasto(g.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+      {modal && <GastoModal gasto={modal} session={session} onClose={() => setModal(null)} onSave={async (g, opts) => { await guardarGasto(g); if (!opts?.seguir) setModal(null); }} />}
+    </div>
+  );
+}
+
+function GastoModal({ gasto, session, onClose, onSave }) {
+  const nombreUsuario = session?.nombre || session?.email || "";
+  const vacio = { fecha: hoy(), fechaPago: "", categoria: "Mano de obra", descripcion: "", monto: "", cuenta: "empresa" };
+  const [f, setF] = useState(gasto.id ? { ...vacio, ...gasto, fechaPago: gasto.fechaPago || "", monto: String(gasto.monto) } : vacio);
+  const [ultimo, setUltimo] = useState("");
+  const payload = {
+    id: gasto.id, fecha: f.fecha, fechaPago: f.fechaPago || null, categoria: f.categoria, descripcion: f.descripcion, monto: parseNum(f.monto), cuenta: f.cuenta,
+    registradoPor: f.cuenta === "personal" ? (gasto.id && gasto.registradoPor) || nombreUsuario : null,
+  };
+  const v = useValidacion(VAL.validarGasto(payload));
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const guardar = (seguir) => v.enviar(async () => {
+    await onSave(payload, { seguir });
+    if (seguir) { setUltimo(f.descripcion.trim()); setF({ ...vacio, fecha: f.fecha, categoria: f.categoria, cuenta: f.cuenta }); v.reiniciar(); }
+  });
+  return (
+    <Modal title={gasto.id ? "Editar gasto operativo" : "Registrar gasto operativo"} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {ultimo && <div role="status" style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}><Check size={14} style={{ verticalAlign: "-2px" }} /> Guardado: {ultimo}.</div>}
+        <Field label="Categoría" v={v} campo="categoria"><Select value={f.categoria} onChange={set("categoria")}>{VAL.CATEGORIAS_GASTO.map((c) => <option key={c}>{c}</option>)}</Select></Field>
+        <Field label="Descripción (ej. ayuda en el armado de pedidos)" v={v} campo="descripcion"><Input value={f.descripcion} onChange={set("descripcion")} maxLength={120} autoFocus /></Field>
+        <Field label="Monto pagado" v={v} campo="monto"><NumInput value={f.monto} onChange={set("monto")} placeholder="0.00" /></Field>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Field label="Fecha del gasto" v={v} campo="fecha"><Input type="date" value={f.fecha} onChange={set("fecha")} /></Field>
+          <Field label="Fecha de pago (si es distinta)" v={v} campo="fechaPago"><Input type="date" value={f.fechaPago} onChange={set("fechaPago")} /></Field>
+        </div>
+        <Field label="¿Con qué dinero se pagó?" v={v} campo="cuenta">
+          <Select value={f.cuenta} onChange={set("cuenta")}>
+            <option value="empresa">Cuenta de la empresa</option>
+            <option value="personal">Cuenta personal (a reembolsar)</option>
+          </Select>
+        </Field>
+        <ErrorForm v={v} />
+        {gasto.id ? (
+          <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ justifyContent: "center", marginTop: 6 }}>Guardar cambios</Btn>
+        ) : (
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <Btn variant="ghost" disabled={v.enviando} onClick={() => guardar(true)} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otro</Btn>
+            <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ flex: 1, justifyContent: "center" }}>Guardar y cerrar</Btn>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------------- COMPRAS ---------------- */
-function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, asignarFoto, guardarDocumento, eliminarDocumento }) {
+function ComprasInsumos({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, asignarFoto, guardarDocumento, eliminarDocumento }) {
   const [modal, setModal] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
   const [abiertos, setAbiertos] = useState(() => new Set());
@@ -1200,7 +1587,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
                     <ChevronRight size={16} style={{ transform: abierto ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
                     <div>
                       <div style={{ fontSize: 13.5, fontWeight: 600 }}>{primera.tipoDocumento}{primera.numero ? ` #${primera.numero}` : " (sin número)"}</div>
-                      <div style={{ fontSize: 12, color: C.inkSoft }}>{primera.fecha} · {g.compras.length} {g.compras.length === 1 ? "ítem" : "ítems"}{personal ? ` · pagado por ${primera.registradoPor || "cuenta personal"}` : ""}</div>
+                      <div style={{ fontSize: 12, color: C.inkSoft }}>{primera.fecha}{primera.fechaPago && primera.fechaPago !== primera.fecha ? ` (pagado el ${primera.fechaPago})` : ""} · {g.compras.length} {g.compras.length === 1 ? "ítem" : "ítems"}{personal ? ` · pagado por ${primera.registradoPor || "cuenta personal"}` : ""}</div>
                       {personal && <div style={{ fontSize: 11.5, fontWeight: 600, color: pendientes ? C.brick : C.sage }}>{pendientes ? `${pendientes} pendiente(s) de reembolso` : "ya reembolsado"}</div>}
                     </div>
                   </div>
@@ -1215,7 +1602,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
                         <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{ing ? ing.nombre : "—"}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
-                            <div style={{ fontSize: 12, color: C.inkSoft }}>{fmtNum(c.cantidad, 4)} {c.unidad} · {clp(cu)}/{c.unidad}</div>
+                            <div style={{ fontSize: 12, color: C.inkSoft }}>{fmtNum(c.cantidad, 4)} {c.unidad} · {clpU(cu)}/{c.unidad}</div>
                             {c.cuenta === "personal" && (
                               <button
                                 onClick={() => marcarReembolso(c.id, c.reembolsado ? 0 : 1)}
@@ -1253,7 +1640,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
               <div key={ing.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
                 <span>{ing.nombre} <span style={{ color: C.inkSoft }}>· {ing.unidad}</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clp(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
+                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clpU(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
                   <button aria-label={`Editar ${ing.nombre}`} onClick={() => setModalIng(ing)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><Pencil size={13} /></button>
                   <button aria-label={`Eliminar ${ing.nombre}`} onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
                 </div>
@@ -1318,10 +1705,10 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
   const primerIng = data.ingredientes[0];
   const itemVacio = (ing) => ({ ingredienteId: ing?.id || "", marca: "", cantidad: "", unidad: ing?.unidad || "g", costoTotal: "", porUnidades: false, unidades: "", contenidoPorUnidad: "" });
   const [f, setF] = useState(editando ? {
-    fecha: doc[0].fecha, tipoDocumento: doc[0].tipoDocumento, numero: doc[0].numero || "", cuenta: doc[0].cuenta || "empresa",
+    fecha: doc[0].fecha, fechaPago: doc[0].fechaPago || "", tipoDocumento: doc[0].tipoDocumento, numero: doc[0].numero || "", cuenta: doc[0].cuenta || "empresa",
     items: doc.map((c) => ({ id: c.id, ingredienteId: c.ingredienteId, marca: c.marca || "", cantidad: String(c.cantidad), unidad: c.unidad, costoTotal: String(c.costoTotal), porUnidades: false, unidades: "", contenidoPorUnidad: "" })),
   } : {
-    fecha: hoy(), tipoDocumento: "Boleta", numero: "", cuenta: "empresa",
+    fecha: hoy(), fechaPago: "", tipoDocumento: "Boleta", numero: "", cuenta: "empresa",
     items: primerIng ? [itemVacio(primerIng)] : [],
   });
   const nombreUsuario = session?.nombre || session?.email || "";
@@ -1345,7 +1732,7 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
   const cantidadFinal = (it) => (it.porUnidades ? parseNum(it.unidades) * parseNum(it.contenidoPorUnidad) : parseNum(it.cantidad));
 
   const payload = {
-    fecha: f.fecha, tipoDocumento: f.tipoDocumento, numero: f.numero,
+    fecha: f.fecha, fechaPago: f.fechaPago || null, tipoDocumento: f.tipoDocumento, numero: f.numero,
     cuenta: f.cuenta, registradoPor: f.cuenta === "personal" ? (editando && doc[0].registradoPor) || nombreUsuario : null,
     ...(editando ? { ids: doc.map((c) => c.id) } : {}),
     items: f.items.map((it) => ({ id: it.id, ingredienteId: it.ingredienteId, marca: it.marca || null, unidad: it.unidad, cantidad: cantidadFinal(it), costoTotal: parseNum(it.costoTotal) })),
@@ -1359,6 +1746,7 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
           <Field label="Fecha" v={v} campo="fecha"><Input type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Field>
           <Field label="Tipo de documento" v={v} campo="tipoDocumento"><Select value={f.tipoDocumento} onChange={(e) => setF({ ...f, tipoDocumento: e.target.value })}>{TIPOS_DOC.map((t) => <option key={t}>{t}</option>)}</Select></Field>
         </div>
+        <Field label="Fecha de pago (solo si pagaste otro día)" v={v} campo="fechaPago"><Input type="date" value={f.fechaPago || ""} onChange={(e) => setF({ ...f, fechaPago: e.target.value })} /></Field>
         <Field label="N° de documento (opcional)" v={v} campo="numero"><Input value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} maxLength={40} /></Field>
         <Field label="¿Con qué dinero se pagó?" v={v} campo="cuenta">
           <Select value={f.cuenta} onChange={(e) => setF({ ...f, cuenta: e.target.value })}>
@@ -1412,23 +1800,23 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
                   </button>
 
                   {it.porUnidades ? (
-                    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1 }}><Field label="N° de unidades" v={v} campo={kCant}><NumInput value={it.unidades} onChange={(e) => setItem(idx, { unidades: e.target.value })} /></Field></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 6, alignItems: "start" }}>
+                      <div style={{ minWidth: 0 }}><Field label="N° de unidades" v={v} campo={kCant}><NumInput value={it.unidades} onChange={(e) => setItem(idx, { unidades: e.target.value })} /></Field></div>
                       <span style={{ color: C.inkSoft, fontSize: 13, paddingTop: 28 }}>×</span>
-                      <div style={{ flex: 1 }}><Field label="Contenido c/u"><NumInput value={it.contenidoPorUnidad} onChange={(e) => setItem(idx, { contenidoPorUnidad: e.target.value })} {...v.p(kCant)} /></Field></div>
-                      <div style={{ flex: 1 }}><Field label="Unidad" v={v} campo={`items.${idx}.unidad`}><Select value={it.unidad} onChange={(e) => setItem(idx, { unidad: e.target.value })}>{unidadesPosibles.map((u) => <option key={u} value={u}>{u}</option>)}</Select></Field></div>
+                      <div style={{ minWidth: 0 }}><Field label="Contenido de cada una"><NumInput value={it.contenidoPorUnidad} onChange={(e) => setItem(idx, { contenidoPorUnidad: e.target.value })} {...v.p(kCant)} /></Field></div>
+                      <div style={{ gridColumn: "1 / -1", minWidth: 0 }}><Field label="Unidad del contenido" v={v} campo={`items.${idx}.unidad`}><Select value={it.unidad} onChange={(e) => setItem(idx, { unidad: e.target.value })}>{unidadesPosibles.map((u) => <option key={u} value={u}>{u}</option>)}</Select></Field></div>
                     </div>
                   ) : (
                     <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1 }}><Field label="Cantidad total" v={v} campo={kCant}><NumInput value={it.cantidad} onChange={(e) => setItem(idx, { cantidad: e.target.value })} /></Field></div>
-                      <div style={{ flex: 1 }}><Field label="Unidad" v={v} campo={`items.${idx}.unidad`}><Select value={it.unidad} onChange={(e) => setItem(idx, { unidad: e.target.value })}>{unidadesPosibles.map((u) => <option key={u} value={u}>{u}</option>)}</Select></Field></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><Field label="Cantidad total" v={v} campo={kCant}><NumInput value={it.cantidad} onChange={(e) => setItem(idx, { cantidad: e.target.value })} /></Field></div>
+                      <div style={{ flex: 1, minWidth: 0 }}><Field label="Unidad" v={v} campo={`items.${idx}.unidad`}><Select value={it.unidad} onChange={(e) => setItem(idx, { unidad: e.target.value })}>{unidadesPosibles.map((u) => <option key={u} value={u}>{u}</option>)}</Select></Field></div>
                     </div>
                   )}
 
-                  {it.porUnidades && cantidadFinal(it) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>= {fmtNum(cantidadFinal(it))} {it.unidad} en total</div>}
+                  {it.porUnidades && cantidadFinal(it) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>= {fmtNum(cantidadFinal(it), 4)} {it.unidad} en total</div>}
 
                   <Field label="Costo total pagado por este insumo" v={v} campo={kCosto}><NumInput value={it.costoTotal} onChange={(e) => setItem(idx, { costoTotal: e.target.value })} /></Field>
-                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {clp(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
+                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {clpU(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
                 </div>
               );
             })}
@@ -1883,7 +2271,7 @@ function RecetasBase({ data, costeo, stock, guardarRecetaBase, eliminarRecetaBas
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${clp(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${clpU(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); eliminarRecetaBase(r.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={15} /></button>
                     <ChevronRight size={16} color={C.inkSoft} />
@@ -1961,7 +2349,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, marginBottom: 4 }}>{receta.nombre}</div>
-          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? clp(cpu) : "aún sin lotes registrados"}</div>
+          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? clpU(cpu) : "aún sin lotes registrados"}</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: stockTotal < 0 ? C.brick : C.sage, marginBottom: 14 }}>Stock total: {fmtNum(stockTotal)} {u}</div>
         </div>
         <button onClick={() => setModalEditar(true)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
@@ -1983,7 +2371,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{l.codigo} <span style={{ fontWeight: 400, color: C.inkSoft }}>· {l.fecha}</span></div>
                     <div style={{ fontSize: 12, color: C.inkSoft }}>Rindió {fmtNum(l.rendimientoReal)} {l.unidadRendimiento} · costo lote {clp(costoLote)}</div>
-                    <div style={{ fontSize: 12, color: C.sage }}>{clp(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
+                    <div style={{ fontSize: 12, color: C.sage }}>{clpU(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: stockLote < 0 ? C.brick : C.sage, marginTop: 2 }}>Stock: {fmtNum(stockLote)} {u}</div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
@@ -2247,7 +2635,7 @@ function CasillaPermiso({ checked, onChange, disabled, children }) {
 function CampoClave({ value, onChange, label, v, campo }) {
   const msg = v && campo ? v.msg(campo) : null;
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }} onBlur={v && campo ? () => v.tocar(campo) : undefined}>
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, minWidth: 0 }} onBlur={v && campo ? () => v.tocar(campo) : undefined}>
       <span style={{ color: C.inkSoft, fontWeight: 600 }}>{label}</span>
       <div style={{ display: "flex", gap: 6 }}>
         <Input value={value} onChange={(e) => onChange(e.target.value)} autoComplete="off" invalid={!!msg} style={{ flex: 1, fontFamily: "ui-monospace, Menlo, monospace" }} />
@@ -2377,7 +2765,7 @@ const ACCION_AUD = {
   clave_restablecida: { texto: "Restableció contraseña", color: C.caramelDark, fondo: C.chip },
   recuperacion_pedida: { texto: "Pidió código", color: C.inkSoft, fondo: C.chip },
 };
-const ENTIDAD_AUD = { cliente: "Cliente", insumo: "Insumo", compra: "Compra", receta: "Receta base", lote: "Lote", producto: "Producto", venta: "Venta", pedido: "Pedido", ajuste: "Ajuste de stock", usuario: "Usuario", acceso: "Acceso" };
+const ENTIDAD_AUD = { cliente: "Cliente", insumo: "Insumo", compra: "Compra", receta: "Receta base", lote: "Lote", producto: "Producto", venta: "Venta", pedido: "Pedido", ajuste: "Ajuste de stock", gasto: "Gasto operativo", caja: "Caja", usuario: "Usuario", acceso: "Acceso" };
 const textoValor = (x) => (x == null || x === "" ? "—" : Array.isArray(x) ? (x.length ? x.join("; ") : "—") : String(x));
 
 function CambiosAuditoria({ item }) {
@@ -2762,10 +3150,11 @@ function DetalleVenta({ venta, data, cambiarCuentaVenta }) {
   const [editando, setEditando] = useState(false);
   const [cuenta, setCuenta] = useState(venta.cuenta || "empresa");
   const [registradoPor, setRegistradoPor] = useState(venta.registradoPor || "");
+  const [fechaCobro, setFechaCobro] = useState(venta.fechaCobro || hoy());
 
-  const v = useValidacion(VAL.validarCuentaVenta({ cuenta, registradoPor }));
+  const v = useValidacion(VAL.validarCuentaVenta({ cuenta, registradoPor, fechaCobro }));
   const guardarCuenta = () => v.enviar(async () => {
-    await cambiarCuentaVenta(venta.id, cuenta, cuenta === "personal" ? registradoPor.trim() : null);
+    await cambiarCuentaVenta(venta.id, cuenta, cuenta === "personal" ? registradoPor.trim() : null, cuenta === "pendiente" ? null : fechaCobro);
     setEditando(false);
   });
 
@@ -2774,7 +3163,7 @@ function DetalleVenta({ venta, data, cambiarCuentaVenta }) {
       <div style={{ background: C.chip, borderRadius: 6, padding: 8 }}>
         {!editando ? (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: COLOR_CUENTA(venta) }}>{ETIQUETA_CUENTA(venta) || "Sin estado"}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: COLOR_CUENTA(venta) }}>{ETIQUETA_CUENTA(venta) || "Sin estado"}{venta.cuenta !== "pendiente" && venta.fechaCobro && venta.fechaCobro !== venta.fecha ? ` · cobrado el ${venta.fechaCobro}` : ""}</span>
             <button onClick={() => setEditando(true)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, fontSize: 11 }}>cambiar</button>
           </div>
         ) : (
@@ -2784,6 +3173,7 @@ function DetalleVenta({ venta, data, cambiarCuentaVenta }) {
               <option value="empresa">Cuenta de la empresa</option>
               <option value="pendiente">Pendiente de pago</option>
             </Select>
+            {cuenta !== "pendiente" && <Field label="Fecha en que se cobró" v={v} campo="fechaCobro"><Input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} /></Field>}
             {cuenta === "personal" && <Field label="Nombre de quién tiene el dinero" v={v} campo="registradoPor"><Input value={registradoPor} onChange={(e) => setRegistradoPor(e.target.value)} maxLength={60} /></Field>}
             <ErrorForm v={v} />
             <div style={{ display: "flex", gap: 6 }}>
