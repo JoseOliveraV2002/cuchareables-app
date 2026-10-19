@@ -29,21 +29,20 @@ const A_BASE = { g: 1, kg: 1000, ml: 1, l: 1000, m: 100, cm: 1, unidad: 1 };
 const BASE_DE = { peso: "g", volumen: "ml", longitud: "cm", conteo: "unidad" };
 const TIPOS_DOC = ["Boleta", "Factura", "Guía de despacho", "Otro"];
 const clp = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 2 });
-// Convierte texto escrito con puntos de miles y/o coma decimal (formato peruano) a número real.
-// "1.500" -> 1500 · "1,5" -> 1.5 · "16352" -> 16352
+// Costos unitarios (por g, ml, kg...): muestra hasta 4 decimales para que S/ 0.0094 no se vea como S/ 0.01.
+const precioUnit = (n) => (isFinite(n) ? n : 0).toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 2, maximumFractionDigits: 4 });
+// Convierte lo que se escribe en un campo numérico a número real.
+//  "0.956" -> 0.956 · "1.5" -> 1.5 · "1.500" -> 1.5 · "0.9560" -> 0.956   (un solo punto = decimal)
+//  "1,5"   -> 1.5   · "1.234,5" -> 1234.5 (coma = decimal, puntos = miles)
+//  "1.234.567" -> 1234567 (varios puntos = miles)
 const parseNum = (v) => {
   if (typeof v === "number") return v;
   if (v == null || v === "") return 0;
   let s = String(v).trim();
   if (s.includes(",")) {
-    // coma = decimal, los puntos son de miles (ej. 1.234,5 -> 1234.5)
     s = s.replace(/\./g, "").replace(",", ".");
-  } else {
-    const partes = s.split(".");
-    if (partes.length > 1 && partes[partes.length - 1].length === 3) {
-      // se ve como puntos de miles (ej. 1.500 -> 1500), no un decimal
-      s = partes.join("");
-    }
+  } else if ((s.match(/\./g) || []).length > 1) {
+    s = s.replace(/\./g, "");
   }
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
@@ -971,7 +970,7 @@ function Planificador({ data, stock }) {
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" }}>
                     <span>{p.receta.nombre} × {fmtNum(p.veces)}</span>
                     <span style={{ color: C.inkSoft }}>
-                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${clp(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
+                      {clp(p.costo)}{p.rendimientoBase != null ? ` · rinde aprox. ${fmtNum(p.rendimientoBase, 0)} ${u} (${precioUnit(p.costo / p.rendimientoBase)}/${u})` : " · sin lotes para estimar el rendimiento"}
                     </span>
                   </div>
                 );
@@ -1197,35 +1196,6 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ninguna compra coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-<<<<<<< Updated upstream
-          {ordenadas.map((c) => {
-            const ing = data.ingredientes.find((i) => i.id === c.ingredienteId);
-            const cu = Number(c.cantidad) > 0 ? Number(c.costoTotal) / Number(c.cantidad) : 0;
-            return (
-              <Card key={c.id} style={{ padding: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{ing ? ing.nombre : "—"}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
-                    <div style={{ fontSize: 12, color: C.inkSoft }}>{c.fecha} · {c.tipoDocumento}{c.numero && ` #${c.numero}`} · {fmtNum(c.cantidad)} {c.unidad}</div>
-                    {c.cuenta === "personal" && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, color: c.reembolsado ? C.sage : C.brick }}>
-                          Pagado por {c.registradoPor || "cuenta personal"} — {c.reembolsado ? "ya reembolsado" : "pendiente de reembolso"}
-                        </span>
-                        <button
-                          onClick={() => marcarReembolso(c.id, c.reembolsado ? 0 : 1)}
-                          style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}
-                        >
-                          {c.reembolsado ? "marcar pendiente" : "marcar reembolsado"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(c.costoTotal)}</div>
-                    <div style={{ fontSize: 11, color: C.inkSoft }}>{clp(cu)}/{c.unidad}</div>
-                    <button onClick={() => eliminarCompra(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
-=======
           {documentos.map((d) => (
             <Card key={d.clave} style={{ padding: 12, cursor: "pointer" }} onClick={() => setDocAbierto(d.clave)}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
@@ -1234,7 +1204,6 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
                   <div style={{ fontSize: 12, color: C.inkSoft }}>{d.fecha} · {d.items.length} insumo(s)</div>
                   <div style={{ fontSize: 12, color: C.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {d.items.slice(0, 3).map(nombreInsumo).join(", ")}{d.items.length > 3 ? ` y ${d.items.length - 3} más` : ""}
->>>>>>> Stashed changes
                   </div>
                   {d.cuenta === "personal" && (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
@@ -1305,7 +1274,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
               <div key={ing.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
                 <span>{ing.nombre} <span style={{ color: C.inkSoft }}>· {ing.unidad}</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clp(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
+                  <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${precioUnit(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
                   <button aria-label={`Editar ${ing.nombre}`} onClick={() => setModalIng(ing)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><Pencil size={13} /></button>
                   <button aria-label={`Eliminar ${ing.nombre}`} onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
                 </div>
@@ -1450,7 +1419,7 @@ function CompraModal({ data, session, onClose, onSave, onNuevoIngrediente }) {
                   {it.porUnidades && cantidadFinal(it) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>= {fmtNum(cantidadFinal(it))} {it.unidad} en total</div>}
 
                   <Field label="Costo total pagado por este insumo" v={v} campo={kCosto}><NumInput value={it.costoTotal} onChange={(e) => setItem(idx, { costoTotal: e.target.value })} /></Field>
-                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {clp(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
+                  {cantidadFinal(it) > 0 && parseNum(it.costoTotal) > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Costo unitario: {precioUnit(parseNum(it.costoTotal) / cantidadFinal(it))} / {it.unidad}</div>}
                 </div>
               );
             })}
@@ -1848,7 +1817,7 @@ function RecetasBase({ data, costeo, stock, guardarRecetaBase, eliminarRecetaBas
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${clp(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: cpu != null ? C.sage : C.inkSoft }}>{cpu != null ? `${precioUnit(cpu)}/${baseUnidadDe(r.unidadRendimiento)}` : "sin lotes aún"}</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); eliminarRecetaBase(r.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={15} /></button>
                     <ChevronRight size={16} color={C.inkSoft} />
@@ -1926,7 +1895,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 19, fontWeight: 600, marginBottom: 4 }}>{receta.nombre}</div>
-          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? clp(cpu) : "aún sin lotes registrados"}</div>
+          <div style={{ fontSize: 12, color: C.inkSoft }}>Costo por {u}: {cpu != null ? precioUnit(cpu) : "aún sin lotes registrados"}</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: stockTotal < 0 ? C.brick : C.sage, marginBottom: 14 }}>Stock total: {fmtNum(stockTotal)} {u}</div>
         </div>
         <button onClick={() => setModalEditar(true)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
@@ -1948,7 +1917,7 @@ function DetalleRecetaBase({ receta, data, costeo, stock, guardarRecetaBase, gua
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{l.codigo} <span style={{ fontWeight: 400, color: C.inkSoft }}>· {l.fecha}</span></div>
                     <div style={{ fontSize: 12, color: C.inkSoft }}>Rindió {fmtNum(l.rendimientoReal)} {l.unidadRendimiento} · costo lote {clp(costoLote)}</div>
-                    <div style={{ fontSize: 12, color: C.sage }}>{clp(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
+                    <div style={{ fontSize: 12, color: C.sage }}>{precioUnit(cpuLote)} / {baseUnidadDe(l.unidadRendimiento)}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: stockLote < 0 ? C.brick : C.sage, marginTop: 2 }}>Stock: {fmtNum(stockLote)} {u}</div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
