@@ -723,6 +723,11 @@ function MainApp({ session, onLogout }) {
     guardarCompra: wrapForm(saveCompra),
     eliminarCompra: conf("¿Eliminar esta compra?", wrap(deleteCompra)),
     marcarReembolso: wrap(marcarReembolso),
+    marcarReembolsoDocumento: wrap(async (ids, valor) => { for (const id of ids) await marcarReembolso(id, valor); }),
+    eliminarDocumentoCompra: async (ids, nombre) => {
+      if (!(await confirmar(`¿Eliminar ${nombre} completo, con sus ${ids.length} insumo(s)?`))) return;
+      return wrap(async () => { for (const id of ids) await deleteCompra(id); })();
+    },
     guardarRecetaBase: wrapForm(saveRecetaBase),
     eliminarRecetaBase: conf("¿Eliminar esta receta base? También se eliminarán todos sus lotes.", wrap(deleteRecetaBase)),
     guardarProduccion: wrapForm(saveProduccion),
@@ -1131,14 +1136,38 @@ function ClienteModal({ cliente, onClose, onSave }) {
   );
 }
 /* ---------------- COMPRAS ---------------- */
-function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso }) {
+function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, marcarReembolsoDocumento, eliminarDocumentoCompra }) {
   const [modal, setModal] = useState(null);
   const [modalIng, setModalIng] = useState(null);
   const [fCuenta, setFCuenta] = useState("todas");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [docAbierto, setDocAbierto] = useState(null);
   const ordenadas = data.compras.filter((c) => (fCuenta === "todas" || c.cuenta === fCuenta) && (!desde || c.fecha >= desde) && (!hasta || c.fecha <= hasta));
   const totalFiltrado = ordenadas.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
+
+  // Un documento (boleta/factura) = una sola tarjeta con todos sus insumos.
+  // Las compras nuevas comparten documentoId; las antiguas se agrupan por fecha + tipo + N° + cuenta (si tienen N°).
+  const documentos = [];
+  const porClave = new Map();
+  ordenadas.forEach((c) => {
+    const clave = c.documentoId || (c.numero ? [c.fecha, c.tipoDocumento, c.numero, c.cuenta || "", c.registradoPor || ""].join("|") : `solo-${c.id}`);
+    let d = porClave.get(clave);
+    if (!d) {
+      d = { clave, fecha: c.fecha, tipoDocumento: c.tipoDocumento, numero: c.numero, cuenta: c.cuenta, registradoPor: c.registradoPor, items: [] };
+      porClave.set(clave, d);
+      documentos.push(d);
+    }
+    d.items.push(c);
+  });
+  documentos.forEach((d) => {
+    d.total = d.items.reduce((s, c) => s + (Number(c.costoTotal) || 0), 0);
+    d.pendiente = d.items.some((c) => !c.reembolsado);
+    d.ids = d.items.map((c) => c.id);
+    d.titulo = `${d.tipoDocumento}${d.numero ? ` #${d.numero}` : ""}`;
+  });
+  const nombreInsumo = (c) => data.ingredientes.find((i) => i.id === c.ingredienteId)?.nombre || "—";
+  const docActual = docAbierto ? documentos.find((d) => d.clave === docAbierto) : null;
 
   return (
     <div style={{ paddingTop: 8 }}>
@@ -1159,7 +1188,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{ordenadas.length} compra(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{documentos.length} documento(s) · {ordenadas.length} insumo(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(totalFiltrado)}</span></div>
       </Card>
 
       {data.compras.length === 0 ? (
@@ -1168,6 +1197,7 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
         <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ninguna compra coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+<<<<<<< Updated upstream
           {ordenadas.map((c) => {
             const ing = data.ingredientes.find((i) => i.id === c.ingredienteId);
             const cu = Number(c.cantidad) > 0 ? Number(c.costoTotal) / Number(c.cantidad) : 0;
@@ -1195,12 +1225,76 @@ function Compras({ data, costeo, session, guardarCompra, eliminarCompra, guardar
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(c.costoTotal)}</div>
                     <div style={{ fontSize: 11, color: C.inkSoft }}>{clp(cu)}/{c.unidad}</div>
                     <button onClick={() => eliminarCompra(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+=======
+          {documentos.map((d) => (
+            <Card key={d.clave} style={{ padding: 12, cursor: "pointer" }} onClick={() => setDocAbierto(d.clave)}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{d.titulo}</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft }}>{d.fecha} · {d.items.length} insumo(s)</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {d.items.slice(0, 3).map(nombreInsumo).join(", ")}{d.items.length > 3 ? ` y ${d.items.length - 3} más` : ""}
+>>>>>>> Stashed changes
                   </div>
+                  {d.cuenta === "personal" && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, color: d.pendiente ? C.brick : C.sage }}>
+                        Pagado por {d.registradoPor || "cuenta personal"} — {d.pendiente ? "pendiente de reembolso" : "ya reembolsado"}
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); marcarReembolsoDocumento(d.ids, d.pendiente ? 1 : 0); }}
+                        style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}
+                      >
+                        {d.pendiente ? "marcar reembolsado" : "marcar pendiente"}
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </Card>
-            );
-          })}
+                <div style={{ textAlign: "right", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{clp(d.total)}</div>
+                  <ChevronRight size={16} color={C.inkSoft} />
+                </div>
+              </div>
+            </Card>
+          ))}
         </div>
+      )}
+
+      {docActual && (
+        <Modal title={docActual.titulo} onClose={() => setDocAbierto(null)} wide>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 12.5, color: C.inkSoft }}>
+              {docActual.fecha} · {docActual.items.length} insumo(s) · {docActual.cuenta === "personal" ? `Pagado por ${docActual.registradoPor || "cuenta personal"} (a reembolsar)` : "Cuenta de la empresa"}
+            </div>
+            {docActual.items.map((c) => {
+              const cu = Number(c.cantidad) > 0 ? Number(c.costoTotal) / Number(c.cantidad) : 0;
+              return (
+                <Card key={c.id} style={{ padding: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{nombreInsumo(c)}{c.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {c.marca}</span>}</div>
+                      <div style={{ fontSize: 12, color: C.inkSoft }}>{fmtNum(c.cantidad, 3)} {c.unidad}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(c.costoTotal)}</div>
+                      <div style={{ fontSize: 11, color: C.inkSoft }}>{precioUnit(cu)}/{c.unidad}</div>
+                      <button aria-label={`Eliminar ${nombreInsumo(c)} de este documento`} onClick={() => eliminarCompra(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, borderTop: `1px solid ${C.line}`, paddingTop: 8 }}><span>Total del documento</span><span>{clp(docActual.total)}</span></div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {docActual.cuenta === "personal" && (
+                <Btn variant="ghost" onClick={() => marcarReembolsoDocumento(docActual.ids, docActual.pendiente ? 1 : 0)} style={{ flex: 1, justifyContent: "center" }}>
+                  {docActual.pendiente ? "Marcar todo como reembolsado" : "Marcar todo como pendiente"}
+                </Btn>
+              )}
+              <Btn variant="danger" onClick={async () => { await eliminarDocumentoCompra(docActual.ids, docActual.titulo); }} style={{ flex: 1, justifyContent: "center" }}><Trash2 size={14} /> Eliminar documento</Btn>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {data.ingredientes.length > 0 && (
