@@ -114,3 +114,5 @@ La base de datos es SQLite alojada en **Turso** (gratis), así que la app corre 
 5. Copias de seguridad: desde Turso (`turso db shell venu .dump`).
 
 Sin esas variables, la app usa el archivo local `data.sqlite` (desarrollo). El `Dockerfile` sigue disponible como alternativa con disco propio.
+
+- **Historial de precios para todos los ítems**: en Stock (Insumos y Artículos) y en Compras (botón «precios» por insumo) se ve último precio, más barato, promedio, comparación por marca y compras anteriores.

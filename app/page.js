@@ -1684,6 +1684,7 @@ function GastoModal({ data, lineas, session, onClose, onSave }) {
 function ComprasInsumos({ data, costeo, session, guardarCompra, eliminarCompra, guardarIngrediente, eliminarIngrediente, marcarReembolso, asignarFoto, guardarDocumento, eliminarDocumento }) {
   const [modal, setModal] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
+  const [histIng, setHistIng] = useState(null);
   const [abiertos, setAbiertos] = useState(() => new Set());
   const [docModal, setDocModal] = useState(null);
   const [modalIng, setModalIng] = useState(null);
@@ -1801,6 +1802,7 @@ function ComprasInsumos({ data, costeo, session, guardarCompra, eliminarCompra, 
                 <span>{ing.nombre} <span style={{ color: C.inkSoft }}>· {ing.unidad}</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ color: C.inkSoft }}>{costeo.costoBaseIngrediente[ing.id] ? `${clpU(costeo.costoBaseIngrediente[ing.id])} / ${baseUnidadDe(ing.unidad)}` : "sin compras aún"}</span>
+                  <button onClick={() => setHistIng(ing)} style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}>precios</button>
                   <button aria-label={`Editar ${ing.nombre}`} onClick={() => setModalIng(ing)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><Pencil size={13} /></button>
                   <button aria-label={`Eliminar ${ing.nombre}`} onClick={() => eliminarIngrediente(ing.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick }}><Trash2 size={13} /></button>
                 </div>
@@ -1810,6 +1812,7 @@ function ComprasInsumos({ data, costeo, session, guardarCompra, eliminarCompra, 
         </Card>
       )}
 
+      {histIng && <Modal title={`Precios de ${histIng.nombre}`} onClose={() => setHistIng(null)} wide>{preciosInsumo(data, histIng).compras.length === 0 ? <div style={{ fontSize: 13, color: C.inkSoft }}>Aún no hay compras de este insumo.</div> : <HistorialPrecios p={preciosInsumo(data, histIng)} unidad={histIng.unidad} />}</Modal>}
       {docModal && <DocumentoModal compra={data.compras.find((c) => c.id === docModal)} compras={data.compras} onClose={() => setDocModal(null)} onSave={asignarFoto} />}
       {editDoc && <CompraModal data={data} session={session} doc={editDoc} onClose={() => setEditDoc(null)} onSave={async (c) => { await guardarDocumento(c); setEditDoc(null); setAbiertos((p) => new Set(p)); }} onNuevoIngrediente={() => setModalIng({})} />}
       {modal && <CompraModal data={data} session={session} onClose={() => setModal(null)} onSave={async (c, opts) => { await guardarCompra(c); if (!opts?.seguir) setModal(null); }} onNuevoIngrediente={() => setModalIng({})} />}
@@ -2188,22 +2191,46 @@ function preciosArticulo(data, articuloId) {
   const monto = compras.reduce((s, g) => s + Number(g.monto), 0);
   return { compras, ultimo: compras[compras.length - 1].unitario, minimo: Math.min(...compras.map((g) => g.unitario)), promedio: monto / cant };
 }
-function HistorialPrecios({ data, articuloId }) {
-  const p = preciosArticulo(data, articuloId);
-  if (p.compras.length === 0) return null;
+// Igual que preciosArticulo, pero para un insumo: precio por su unidad (ej. S/ por kg) según cada compra.
+function preciosInsumo(data, ing) {
+  const compras = data.compras.filter((c) => c.ingredienteId === ing.id && Number(c.cantidad) > 0)
+    .map((c) => ({ ...c, cantidad: toBase(c.cantidad, c.unidad) / (A_BASE[ing.unidad] || 1), unitario: Number(c.costoTotal) / (toBase(c.cantidad, c.unidad) / (A_BASE[ing.unidad] || 1)), monto: c.costoTotal }))
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  if (compras.length === 0) return { compras, ultimo: null, minimo: null, promedio: null };
+  const cant = compras.reduce((s, g) => s + g.cantidad, 0);
+  const monto = compras.reduce((s, g) => s + Number(g.costoTotal), 0);
+  return { compras, ultimo: compras[compras.length - 1].unitario, minimo: Math.min(...compras.map((g) => g.unitario)), promedio: monto / cant };
+}
+// Historial de precios por unidad de un insumo o artículo: último, más barato, promedio, por marca y cada compra.
+function HistorialPrecios({ p, unidad }) {
+  if (!p || p.compras.length === 0) return null;
   const dato = (t, v) => (<Card style={{ padding: 10, flex: 1, minWidth: 0 }}><div style={{ fontSize: 12, color: C.inkSoft }}>{t}</div><div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>{clpU(v)}</div></Card>);
   const mejor = p.minimo;
+  const porMarca = {};
+  p.compras.forEach((g) => { const k = (g.marca || "").trim() || "Sin marca"; (porMarca[k] = porMarca[k] || []).push(g); });
+  const marcas = Object.entries(porMarca).map(([marca, l]) => ({ marca, ultimo: l[l.length - 1].unitario, minimo: Math.min(...l.map((x) => x.unitario)), n: l.length })).sort((a, b) => a.ultimo - b.ultimo);
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>Precio por unidad</div>
+      <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>Precio por {unidad}</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>{dato("Último", p.ultimo)}{dato("Más barato", p.minimo)}{dato("Promedio", p.promedio)}</div>
+      {marcas.length > 1 && (
+        <Card style={{ padding: 12, marginBottom: 8 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Por marca (de la más barata a la más cara, según el último precio)</div>
+          {marcas.map((m, i) => (
+            <div key={m.marca} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, padding: "2px 0" }}>
+              <span>{m.marca} <span style={{ color: C.inkSoft }}>({m.n} compra{m.n > 1 ? "s" : ""})</span></span>
+              <span style={{ fontWeight: 600, color: i === 0 ? C.sage : C.ink }}>{clpU(m.ultimo)} / {unidad}{i === 0 ? " ✓" : ""}</span>
+            </div>
+          ))}
+        </Card>
+      )}
       <Card style={{ padding: 12 }}>
         <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Compras anteriores (para comparar)</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {[...p.compras].reverse().map((g) => (
             <div key={g.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
-              <span>{g.fecha}{g.marca ? ` · ${g.marca}` : ""} · {fmtNum(g.cantidad)} und <span style={{ color: C.inkSoft }}>({g.tipoDocumento || "gasto"}{g.numero ? ` ${g.numero}` : ""})</span></span>
-              <span style={{ fontWeight: 600, color: g.unitario === mejor ? C.sage : C.ink, whiteSpace: "nowrap" }}>{clpU(g.unitario)} c/u{g.unitario === mejor ? " ✓" : ""}</span>
+              <span>{g.fecha}{g.marca ? ` · ${g.marca}` : ""} · {fmtNum(g.cantidad)} {unidad} por {clp(g.monto)} <span style={{ color: C.inkSoft }}>({g.tipoDocumento || "gasto"}{g.numero ? ` ${g.numero}` : ""})</span></span>
+              <span style={{ fontWeight: 600, color: g.unitario === mejor ? C.sage : C.ink, whiteSpace: "nowrap" }}>{clpU(g.unitario)}{g.unitario === mejor ? " ✓" : ""}</span>
             </div>
           ))}
         </div>
@@ -2267,7 +2294,7 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
           titulo={esInsumo || esArt ? itemAbierto.nombre : nombreLote(itemAbierto)}
           unidad={esArt ? "unidad" : baseUnidadDe(esInsumo ? itemAbierto.unidad : itemAbierto.unidadRendimiento)}
           stockActual={esArt ? (resumenes[`articulo:${abierto.id}`]?.saldo || 0) : esInsumo ? stock.stockIngrediente(itemAbierto.id) : stock.stockLote(itemAbierto)}
-          extra={esArt ? <HistorialPrecios data={data} articuloId={abierto.id} /> : null}
+          extra={esArt ? <HistorialPrecios p={preciosArticulo(data, abierto.id)} unidad="unidad" /> : esInsumo ? <HistorialPrecios p={preciosInsumo(data, itemAbierto)} unidad={itemAbierto.unidad} /> : null}
           onBack={() => setAbierto(null)} onAjustar={() => setModalAjuste({ tipo: abierto.tipo, item: itemAbierto })} eliminarAjuste={eliminarAjuste}
         />
         {modal}
@@ -2321,7 +2348,7 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
           <EmptyState icon={Layers} title="Sin insumos aún" />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {data.ingredientes.map((ing) => fila({ clave: ing.id, titulo: ing.nombre, tipo: "ingrediente", item: ing, unidad: baseUnidadDe(ing.unidad), stockActual: stock.stockIngrediente(ing.id) }))}
+            {data.ingredientes.map((ing) => { const pr = preciosInsumo(data, ing); return fila({ clave: ing.id, titulo: ing.nombre, sub: pr.ultimo != null ? `Último precio ${clpU(pr.ultimo)} / ${ing.unidad} · mínimo ${clpU(pr.minimo)}` : null, tipo: "ingrediente", item: ing, unidad: baseUnidadDe(ing.unidad), stockActual: stock.stockIngrediente(ing.id) }); })}
           </div>
         )
       ) : recetasConLotes.length === 0 ? (
