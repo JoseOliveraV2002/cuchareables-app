@@ -1,14 +1,14 @@
 "use client";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
-  Users, ShoppingCart, FlaskConical, Package, Receipt, LayoutDashboard,
+  Camera, Upload, Users, ShoppingCart, FlaskConical, Package, Receipt, LayoutDashboard,
   Plus, Trash2, Pencil, X, ChevronRight, ChevronLeft, AlertTriangle, TrendingUp, Loader2, Search, LogOut, Layers, CalendarDays, Check, Menu, ArrowDown, ArrowUp, Mail, Lock, Eye, EyeOff, UserCog, KeyRound, Unlock, ShieldCheck, Ban, Copy, RefreshCw, Hash, History, Calculator,
 } from "lucide-react";
 import {
-  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso, actualizarDocumento, saveGasto, deleteGasto, marcarReembolsoGasto, guardarCierre, borrarCierre, guardarApertura, borrarApertura, subirFoto, asignarFoto, comprimirImagen,
+  fetchAll, saveCliente, deleteCliente, saveIngrediente, deleteIngrediente, saveCompra, deleteCompra, marcarReembolso, actualizarDocumento, saveGasto, deleteGasto, asignarFotoGasto, marcarReembolsoGasto, guardarCierre, borrarCierre, guardarApertura, borrarApertura, subirFoto, asignarFoto, comprimirImagen,
   saveRecetaBase, deleteRecetaBase, saveProduccion, deleteProduccion,
   saveProducto, deleteProducto, saveVenta, deleteVenta, actualizarCuentaVenta, saveAjuste, deleteAjuste,
-  savePedido, deletePedido, cambiarPagoPedido,
+  savePedido, deletePedido, cambiarPagoPedido, congelarCostos,
   fetchUsuarios, crearUsuario, actualizarUsuario, eliminarUsuario, fetchAuditoria,
 } from "../lib/data";
 import permisosCfg from "../lib/permisos";
@@ -57,7 +57,7 @@ const aFecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,
 const hoy = () => aFecha(new Date());
 const deFecha = (f) => { const [y, m, d] = f.split("-").map(Number); return new Date(y, m - 1, d); };
 const sumarDias = (f, n) => { const d = deFecha(f); d.setDate(d.getDate() + n); return aFecha(d); };
-const DATA_VACIA = { clientes: [], ingredientes: [], compras: [], recetasBase: [], producciones: [], productos: [], ventas: [], ajustesInventario: [], pedidos: [], gastos: [], cierres: [], cajaConfig: [] };
+const DATA_VACIA = { clientes: [], ingredientes: [], compras: [], recetasBase: [], producciones: [], productos: [], ventas: [], ajustesInventario: [], pedidos: [], gastos: [], articulos: [], cierres: [], cajaConfig: [] };
 
 function useFonts() {
   useEffect(() => {
@@ -726,7 +726,9 @@ function MainApp({ session, onLogout }) {
     eliminarCompra: conf("¿Eliminar esta compra?", wrap(deleteCompra)),
     marcarReembolso: wrap((id, r) => marcarReembolso(id, r, hoy())),
     guardarGasto: wrapForm(saveGasto),
-    eliminarGasto: conf("¿Eliminar este gasto?", wrap(deleteGasto)),
+    eliminarGasto: conf("¿Eliminar esta línea del gasto?", wrap(deleteGasto)),
+    eliminarDocumentoGasto: conf("¿Eliminar todas las líneas de este documento?", wrap(async (ids) => { for (const id of ids) await deleteGasto(id); })),
+    asignarFotoGasto: wrapForm(asignarFotoGasto),
     marcarReembolsoGasto: wrap((id, r) => marcarReembolsoGasto(id, r, hoy())),
     guardarCierre: wrapForm(guardarCierre),
     borrarCierre: conf("¿Quitar la conciliación de este mes?", wrap(borrarCierre)),
@@ -741,7 +743,7 @@ function MainApp({ session, onLogout }) {
     eliminarProduccion: conf("¿Eliminar este lote?", wrap(deleteProduccion)),
     guardarProducto: wrapForm(saveProducto),
     eliminarProducto: conf("¿Eliminar este producto?", wrap(deleteProducto)),
-    guardarVenta: wrapForm(saveVenta),
+    guardarVenta: wrapForm((v) => saveVenta({ ...v, items: v.items.map((it) => ({ ...it, costoUnitario: costoCongelable(it.productoId) })) })),
     eliminarVenta: conf("¿Eliminar esta venta?", wrap(deleteVenta)),
     cambiarCuentaVenta: wrapForm(actualizarCuentaVenta),
     guardarPedido: wrapForm(savePedido),
@@ -752,6 +754,27 @@ function MainApp({ session, onLogout }) {
   };
 
   const costeo = useCosteo(data);
+  // Costo de producción actual de un producto, solo si está completo (se guarda en la venta para no cambiar después).
+  const costoCongelable = (productoId) => {
+    const p = data.productos.find((x) => x.id === productoId);
+    if (!p) return null;
+    const { costo, incompleto } = costeo.costoProducto(p);
+    return incompleto || !Number.isFinite(costo) ? null : costo;
+  };
+  // Ventas anteriores a esta mejora: se les guarda el costo actual una sola vez (después ya no cambia).
+  const intentadas = useRef(new Set());
+  useEffect(() => {
+    if (!loaded || !(esAdmin || (session.permisos || []).includes("ventas"))) return;
+    const pend = [];
+    data.ventas.forEach((v) => (v.items || []).forEach((it) => {
+      if (it.costoUnitario != null || intentadas.current.has(it.id)) return;
+      const costo = costoCongelable(it.productoId);
+      if (costo != null) pend.push({ itemId: it.id, costo });
+    }));
+    if (pend.length === 0) return;
+    pend.forEach((x) => intentadas.current.add(x.itemId));
+    congelarCostos(pend).then(reload).catch(() => {});
+  }, [loaded, data.ventas, data.productos, data.compras, data.producciones]);
   const stock = useStock(data);
 
   if (!loaded) {
@@ -1255,7 +1278,9 @@ function Dashboard({ data, costeo, guardarCierre, borrarCierre, guardarApertura,
       const nombre = prod ? prod.nombre : "Producto eliminado";
       if (!porProducto[it.productoId]) porProducto[it.productoId] = { nombre, cantidad: 0 };
       porProducto[it.productoId].cantidad += Number(it.cantidad) || 0;
-      if (prod) costoMes += costeo.costoProducto(prod).costo * (Number(it.cantidad) || 0);
+      // Costo congelado al vender; si aún no lo tiene (producto incompleto), se usa el actual.
+      const cu = it.costoUnitario != null ? Number(it.costoUnitario) : prod ? costeo.costoProducto(prod).costo : 0;
+      costoMes += cu * (Number(it.cantidad) || 0);
     });
   });
   const margenMes = totalVentasMes - costoMes;
@@ -1415,20 +1440,62 @@ function Compras(props) {
   );
 }
 
-function Gastos({ data, session, guardarGasto, eliminarGasto, marcarReembolsoGasto }) {
+// Foto de un documento: "Tomar foto" abre la cámara del celular; "Elegir de la galería" toma una imagen guardada.
+function FotoCampo({ foto, onFoto, etiqueta = "Foto del documento" }) {
+  const [err, setErr] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const leer = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setErr(""); setCargando(true);
+    try { onFoto(await comprimirImagen(file)); } catch (er) { setErr(er.message); } finally { setCargando(false); }
+  };
+  const oculto = { position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden" };
+  const boton = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, padding: "10px 12px", borderRadius: 8, fontSize: 13.5, fontWeight: 600, cursor: "pointer", border: `1px solid ${C.line}`, background: "#FFFDFA", color: C.ink, position: "relative" };
+  return (
+    <div>
+      {foto ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <img src={foto} alt="Vista previa del documento" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.line}` }} />
+          <Btn variant="ghost" onClick={() => onFoto(null)}>Quitar foto</Btn>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          <label style={{ ...boton, background: C.chip, borderColor: C.caramel, color: C.caramelDark }}><Camera size={16} /> {cargando ? "Procesando..." : "Tomar foto"}
+            <input type="file" accept="image/*" capture="environment" onChange={leer} aria-label={`${etiqueta}: tomar foto`} style={oculto} />
+          </label>
+          <label style={boton}><Upload size={16} /> Elegir de la galería
+            <input type="file" accept="image/*" onChange={leer} aria-label={`${etiqueta}: elegir de la galería`} style={oculto} />
+          </label>
+        </div>
+      )}
+      {err && <div style={{ color: C.brick, fontSize: 12, marginTop: 4 }}>{err}</div>}
+    </div>
+  );
+}
+
+function Gastos({ data, session, guardarGasto, eliminarGasto, eliminarDocumentoGasto, marcarReembolsoGasto, asignarFotoGasto }) {
   const [modal, setModal] = useState(null);
+  const [docModal, setDocModal] = useState(null);
+  const [abiertos, setAbiertos] = useState(() => new Set());
   const [fCat, setFCat] = useState("todas");
   const [fCuenta, setFCuenta] = useState("todas");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const lista = (data.gastos || []).filter((g) => (fCat === "todas" || g.categoria === fCat) && (fCuenta === "todas" || g.cuenta === fCuenta) && (!desde || g.fecha >= desde) && (!hasta || g.fecha <= hasta));
   const total = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  // Las líneas del mismo documento (fecha + tipo + número) se agrupan en un bloque.
+  const grupos = [];
+  const porClave = new Map();
+  for (const g of lista) {
+    const key = g.numero && g.tipoDocumento ? `${g.fecha}|${g.tipoDocumento}|${g.numero}` : g.id;
+    if (!porClave.has(key)) { const x = { key, lineas: [] }; porClave.set(key, x); grupos.push(x); }
+    porClave.get(key).lineas.push(g);
+  }
   return (
     <div style={{ paddingTop: 12 }}>
-      <Card style={{ padding: 12, marginBottom: 12, background: "#FFF8EC", borderColor: "#E8CFAE" }}>
-        <div style={{ fontSize: 12.5 }}>Aquí van los pagos que <b>no son insumos</b>: mano de obra puntual, servicios, honorarios, transporte, etc. No crean insumos, no tocan el stock ni los costos de las recetas, pero sí restan en la utilidad y en la caja.</div>
-      </Card>
-      <Btn onClick={() => setModal({})} style={{ width: "100%", justifyContent: "center", marginBottom: 12 }}><Plus size={15} /> Registrar gasto operativo</Btn>
+      <Btn onClick={() => setModal({})} style={{ width: "100%", justifyContent: "center", marginBottom: 12 }}><Plus size={15} /> Registrar gastos de un documento</Btn>
 
       <Card style={{ padding: 12, marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1437,7 +1504,7 @@ function Gastos({ data, session, guardarGasto, eliminarGasto, marcarReembolsoGas
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field></div>
           <div style={{ flex: 1, minWidth: 130 }}><Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field></div>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{lista.length} gasto(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(total)}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 13 }}><span style={{ color: C.inkSoft }}>{grupos.length} documento(s) · {lista.length} línea(s)</span><span style={{ fontWeight: 600 }}>Total: {clp(total)}</span></div>
       </Card>
 
       {(data.gastos || []).length === 0 ? (
@@ -1446,73 +1513,166 @@ function Gastos({ data, session, guardarGasto, eliminarGasto, marcarReembolsoGas
         <div style={{ textAlign: "center", padding: 24, color: C.inkSoft, fontSize: 13 }}>Ningún gasto coincide con los filtros.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {lista.map((g) => (
-            <Card key={g.id} style={{ padding: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{g.descripcion}</div>
-                  <div style={{ fontSize: 12, color: C.inkSoft }}>{g.categoria} · {g.fecha}{g.fechaPago && g.fechaPago !== g.fecha ? ` · pagado el ${g.fechaPago}` : ""}</div>
-                  {g.cuenta === "personal" && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 600, color: g.reembolsado ? C.sage : C.brick }}>Pagado por {g.registradoPor} — {g.reembolsado ? `reembolsado${g.fechaReembolso ? ` el ${g.fechaReembolso}` : ""}` : "pendiente de reembolso"}</span>
-                      <button onClick={() => marcarReembolsoGasto(g.id, g.reembolsado ? 0 : 1)} style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: C.inkSoft }}>{g.reembolsado ? "marcar pendiente" : "marcar reembolsado"}</button>
+          {grupos.map((gr) => {
+            const abierto = abiertos.has(gr.key);
+            const p = gr.lineas[0];
+            const totalDoc = gr.lineas.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+            const sinFoto = !gr.lineas.some((g) => g.fotoId);
+            const personal = p.cuenta === "personal";
+            const pendientes = gr.lineas.filter((g) => personal && !g.reembolsado).length;
+            return (
+              <Card key={gr.key} style={{ padding: 0, overflow: "hidden" }}>
+                <button onClick={() => setAbiertos((s) => { const n = new Set(s); n.has(gr.key) ? n.delete(gr.key) : n.add(gr.key); return n; })} aria-expanded={abierto}
+                  style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, textAlign: "left", font: "inherit", color: "inherit" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <ChevronRight size={16} style={{ transform: abierto ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{p.tipoDocumento ? `${p.tipoDocumento}${p.numero ? ` #${p.numero}` : " (sin número)"}` : p.descripcion}</div>
+                      <div style={{ fontSize: 12, color: C.inkSoft }}>{p.fecha}{p.fechaPago && p.fechaPago !== p.fecha ? ` (pagado el ${p.fechaPago})` : ""} · {gr.lineas.length} {gr.lineas.length === 1 ? "línea" : "líneas"}{personal ? ` · pagado por ${p.registradoPor}` : ""}</div>
+                      {sinFoto && <div style={{ fontSize: 11.5, fontWeight: 600, color: C.brick }}>Sin foto del documento</div>}
+                      {personal && <div style={{ fontSize: 11.5, fontWeight: 600, color: pendientes ? C.brick : C.sage }}>{pendientes ? `${pendientes} pendiente(s) de reembolso` : "ya reembolsado"}</div>}
                     </div>
-                  )}
-                </div>
-                <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(g.monto)}</div>
-                  <button aria-label={`Editar ${g.descripcion}`} onClick={() => setModal(g)} style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft, marginTop: 2 }}><Pencil size={14} /></button>
-                  <button aria-label={`Eliminar ${g.descripcion}`} onClick={() => eliminarGasto(g.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
-                </div>
-              </div>
-            </Card>
-          ))}
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap" }}>{clp(totalDoc)}</div>
+                </button>
+                {abierto && (
+                  <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {gr.lineas.map((g) => (
+                      <div key={g.id} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{g.descripcion}{g.marca && <span style={{ fontWeight: 400, color: C.inkSoft }}> · {g.marca}</span>}</div>
+                          <div style={{ fontSize: 12, color: C.inkSoft }}>{g.categoria}{g.articuloId && g.cantidad > 0 ? ` · ${fmtNum(g.cantidad)} und × ${clpU(g.monto / g.cantidad)}` : ""}</div>
+                          {g.cuenta === "personal" && (
+                            <button onClick={() => marcarReembolsoGasto(g.id, g.reembolsado ? 0 : 1)} style={{ background: "none", border: `1px solid ${C.line}`, borderRadius: 6, padding: "2px 7px", fontSize: 11, cursor: "pointer", color: g.reembolsado ? C.sage : C.brick, marginTop: 3 }}>
+                              {g.reembolsado ? `reembolsado${g.fechaReembolso ? ` el ${g.fechaReembolso}` : ""} · marcar pendiente` : "pendiente · marcar reembolsado"}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{clp(g.monto)}</div>
+                          <button aria-label={`Eliminar ${g.descripcion}`} onClick={() => eliminarGasto(g.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, marginTop: 2 }}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+                      <Btn variant="ghost" onClick={() => setModal({ lineas: gr.lineas })}><Pencil size={13} /> Editar documento</Btn>
+                      <Btn variant="ghost" onClick={() => setDocModal(p.id)} style={{ color: sinFoto ? C.brick : C.sage }}>{sinFoto ? "Adjuntar foto" : "Ver documento"}</Btn>
+                      <Btn variant="ghost" onClick={() => eliminarDocumentoGasto(gr.lineas.map((g) => g.id))} style={{ color: C.brick }}><Trash2 size={13} /> Eliminar todo</Btn>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
-      {modal && <GastoModal gasto={modal} session={session} onClose={() => setModal(null)} onSave={async (g, opts) => { await guardarGasto(g); if (!opts?.seguir) setModal(null); }} />}
+      {docModal && <DocumentoModal compra={(data.gastos || []).find((g) => g.id === docModal)} compras={data.gastos || []} onClose={() => setDocModal(null)} onSave={asignarFotoGasto} />}
+      {modal && <GastoModal data={data} lineas={modal.lineas} session={session} onClose={() => setModal(null)} onSave={async (d, opts) => { await guardarGasto(d); if (!opts?.seguir) setModal(null); }} />}
     </div>
   );
 }
 
-function GastoModal({ gasto, session, onClose, onSave }) {
+function GastoModal({ data, lineas, session, onClose, onSave }) {
+  const editando = !!lineas;
   const nombreUsuario = session?.nombre || session?.email || "";
-  const vacio = { fecha: hoy(), fechaPago: "", categoria: "Mano de obra", descripcion: "", monto: "", cuenta: "empresa" };
-  const [f, setF] = useState(gasto.id ? { ...vacio, ...gasto, fechaPago: gasto.fechaPago || "", monto: String(gasto.monto) } : vacio);
+  const lineaVacia = (categoria) => ({ categoria: categoria || VAL.CATEGORIA_ARTICULOS, articulo: "", descripcion: "", marca: "", cantidad: "", monto: "" });
+  const [f, setF] = useState(editando ? {
+    fecha: lineas[0].fecha, fechaPago: lineas[0].fechaPago || "", tipoDocumento: lineas[0].tipoDocumento || "Otro", numero: lineas[0].numero || "", cuenta: lineas[0].cuenta || "empresa",
+    items: lineas.map((g) => ({ id: g.id, categoria: g.categoria, articulo: g.articuloId ? g.descripcion : "", descripcion: g.articuloId ? "" : g.descripcion, marca: g.marca || "", cantidad: g.cantidad != null ? String(g.cantidad) : "", monto: String(g.monto) })),
+  } : { fecha: hoy(), fechaPago: "", tipoDocumento: "Boleta", numero: "", cuenta: "empresa", items: [lineaVacia()] });
+  const [foto, setFoto] = useState(null);
   const [ultimo, setUltimo] = useState("");
+  const setItem = (i, patch) => setF({ ...f, items: f.items.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
   const payload = {
-    id: gasto.id, fecha: f.fecha, fechaPago: f.fechaPago || null, categoria: f.categoria, descripcion: f.descripcion, monto: parseNum(f.monto), cuenta: f.cuenta,
-    registradoPor: f.cuenta === "personal" ? (gasto.id && gasto.registradoPor) || nombreUsuario : null,
+    ...(editando ? { ids: lineas.map((g) => g.id) } : {}),
+    fecha: f.fecha, fechaPago: f.fechaPago || null, tipoDocumento: f.tipoDocumento, numero: f.numero, cuenta: f.cuenta,
+    registradoPor: f.cuenta === "personal" ? (editando && lineas[0].registradoPor) || nombreUsuario : null,
+    items: f.items.map((it) => it.categoria === VAL.CATEGORIA_ARTICULOS
+      ? { id: it.id, categoria: it.categoria, articulo: it.articulo, marca: it.marca, cantidad: parseNum(it.cantidad), monto: parseNum(it.monto) }
+      : { id: it.id, categoria: it.categoria, descripcion: it.descripcion, monto: parseNum(it.monto) }),
   };
-  const v = useValidacion(VAL.validarGasto(payload));
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const errores = { ...VAL.validarGasto(payload), ...(!editando && !foto ? { foto: "Toma o adjunta la foto del documento que evidencia el pago." } : {}) };
+  const v = useValidacion(errores);
+  const nombres = (data.articulos || []).map((a) => a.nombre);
+  const total = payload.items.reduce((s, it) => s + (Number(it.monto) || 0), 0);
   const guardar = (seguir) => v.enviar(async () => {
-    await onSave(payload, { seguir });
-    if (seguir) { setUltimo(f.descripcion.trim()); setF({ ...vacio, fecha: f.fecha, categoria: f.categoria, cuenta: f.cuenta }); v.reiniciar(); }
+    const fotoId = foto ? await subirFoto(foto) : undefined;
+    await onSave({ ...payload, ...(fotoId ? { fotoId } : {}) }, { seguir });
+    if (seguir) {
+      setUltimo(`${f.tipoDocumento}${f.numero ? ` #${f.numero}` : ""}`);
+      setF({ ...f, numero: "", items: [lineaVacia(f.items[0].categoria)] });
+      setFoto(null);
+      v.reiniciar();
+    }
   });
   return (
-    <Modal title={gasto.id ? "Editar gasto operativo" : "Registrar gasto operativo"} onClose={onClose}>
+    <Modal title={editando ? `Editar documento · ${lineas[0].tipoDocumento || "Gasto"}${lineas[0].numero ? ` #${lineas[0].numero}` : ""}` : "Registrar gastos de un documento"} onClose={onClose} wide>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {ultimo && <div role="status" style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}><Check size={14} style={{ verticalAlign: "-2px" }} /> Guardado: {ultimo}.</div>}
-        <Field label="Categoría" v={v} campo="categoria"><Select value={f.categoria} onChange={set("categoria")}>{VAL.CATEGORIAS_GASTO.map((c) => <option key={c}>{c}</option>)}</Select></Field>
-        <Field label="Descripción (ej. ayuda en el armado de pedidos)" v={v} campo="descripcion"><Input value={f.descripcion} onChange={set("descripcion")} maxLength={120} autoFocus /></Field>
-        <Field label="Monto pagado" v={v} campo="monto"><NumInput value={f.monto} onChange={set("monto")} placeholder="0.00" /></Field>
+        {ultimo && <div role="status" style={{ fontSize: 13, color: C.sage, fontWeight: 600 }}><Check size={14} style={{ verticalAlign: "-2px" }} /> Guardado: {ultimo}. Registra el siguiente.</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          <Field label="Fecha del gasto" v={v} campo="fecha"><Input type="date" value={f.fecha} onChange={set("fecha")} /></Field>
-          <Field label="Fecha de pago (si es distinta)" v={v} campo="fechaPago"><Input type="date" value={f.fechaPago} onChange={set("fechaPago")} /></Field>
+          <Field label="Fecha del documento" v={v} campo="fecha"><Input type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Field>
+          <Field label="Tipo de documento" v={v} campo="tipoDocumento"><Select value={f.tipoDocumento} onChange={(e) => setF({ ...f, tipoDocumento: e.target.value })}>{VAL.TIPOS_DOC_GASTO.map((t) => <option key={t}>{t}</option>)}</Select></Field>
         </div>
+        <Field label="Fecha de pago (solo si pagaste otro día)" v={v} campo="fechaPago"><Input type="date" value={f.fechaPago} onChange={(e) => setF({ ...f, fechaPago: e.target.value })} /></Field>
+        <Field label="N° de documento (opcional)" v={v} campo="numero"><Input value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} maxLength={40} /></Field>
         <Field label="¿Con qué dinero se pagó?" v={v} campo="cuenta">
-          <Select value={f.cuenta} onChange={set("cuenta")}>
+          <Select value={f.cuenta} onChange={(e) => setF({ ...f, cuenta: e.target.value })}>
             <option value="empresa">Cuenta de la empresa</option>
             <option value="personal">Cuenta personal (a reembolsar)</option>
           </Select>
         </Field>
+
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.inkSoft, marginBottom: 4 }}>Foto del documento que evidencia el pago {editando ? "(opcional: reemplaza la actual)" : "(obligatoria)"}</div>
+          <FotoCampo foto={foto} onFoto={setFoto} etiqueta="Foto del documento" />
+          <Err v={v} campo="foto" />
+        </div>
+
+        <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>Qué se pagó en este documento</div>
+        <Err v={v} campo="items" />
+        {f.items.map((it, i) => {
+          const esArt = it.categoria === VAL.CATEGORIA_ARTICULOS;
+          const cant = parseNum(it.cantidad), monto = parseNum(it.monto);
+          return (
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, padding: 8, border: `1px solid ${C.line}`, borderRadius: 8 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Field label="Categoría" v={v} campo={`items.${i}.categoria`}><Select value={it.categoria} onChange={(e) => setItem(i, { categoria: e.target.value })}>{VAL.CATEGORIAS_GASTO.map((c) => <option key={c}>{c}</option>)}</Select></Field>
+                </div>
+                {f.items.length > 1 && <button aria-label="Quitar línea" onClick={() => setF({ ...f, items: f.items.filter((_, k) => k !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: C.brick, paddingBottom: 8 }}><Trash2 size={16} /></button>}
+              </div>
+              {esArt ? (
+                <>
+                  <Field label="Artículo (ej. Taper 500 ml)" v={v} campo={`items.${i}.articulo`}>
+                    <Input list="lista-articulos" value={it.articulo} onChange={(e) => setItem(i, { articulo: e.target.value })} maxLength={80} />
+                  </Field>
+                  <Field label="Marca (opcional)" v={v} campo={`items.${i}.marca`}><Input value={it.marca} onChange={(e) => setItem(i, { marca: e.target.value })} maxLength={60} /></Field>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Field label="Cantidad (unidades)" v={v} campo={`items.${i}.cantidad`}><NumInput value={it.cantidad} onChange={(e) => setItem(i, { cantidad: e.target.value })} /></Field>
+                    <Field label="Costo total pagado" v={v} campo={`items.${i}.monto`}><NumInput value={it.monto} onChange={(e) => setItem(i, { monto: e.target.value })} placeholder="0.00" /></Field>
+                  </div>
+                  {cant > 0 && monto > 0 && <div style={{ fontSize: 12, color: C.inkSoft }}>Precio por unidad: {clpU(monto / cant)}</div>}
+                </>
+              ) : (
+                <>
+                  <Field label="Descripción (ej. ayuda en el armado de pedidos)" v={v} campo={`items.${i}.descripcion`}><Input value={it.descripcion} onChange={(e) => setItem(i, { descripcion: e.target.value })} maxLength={120} /></Field>
+                  <Field label="Monto pagado" v={v} campo={`items.${i}.monto`}><NumInput value={it.monto} onChange={(e) => setItem(i, { monto: e.target.value })} placeholder="0.00" /></Field>
+                </>
+              )}
+            </div>
+          );
+        })}
+        <datalist id="lista-articulos">{nombres.map((n) => <option key={n} value={n} />)}</datalist>
+        <Btn variant="ghost" onClick={() => setF({ ...f, items: [...f.items, lineaVacia(f.items[f.items.length - 1]?.categoria)] })}><Plus size={14} /> Agregar otra línea a este documento</Btn>
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, borderTop: `1px solid ${C.line}`, paddingTop: 8 }}><span>Total del documento</span><span>{clp(total)}</span></div>
+
         <ErrorForm v={v} />
-        {gasto.id ? (
+        {editando ? (
           <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ justifyContent: "center", marginTop: 6 }}>Guardar cambios</Btn>
         ) : (
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <Btn variant="ghost" disabled={v.enviando} onClick={() => guardar(true)} style={{ flex: 1, justifyContent: "center" }}>Guardar y agregar otro</Btn>
-            <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ flex: 1, justifyContent: "center" }}>Guardar y cerrar</Btn>
+            <Btn disabled={v.enviando} onClick={() => guardar(false)} style={{ flex: 1, justifyContent: "center" }}>Guardar documento</Btn>
           </div>
         )}
       </div>
@@ -1713,14 +1873,6 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
   });
   const nombreUsuario = session?.nombre || session?.email || "";
   const [foto, setFoto] = useState(null); // data URL ya reducida
-  const [errFoto, setErrFoto] = useState("");
-  const elegirFoto = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
-    setErrFoto("");
-    try { setFoto(await comprimirImagen(file)); } catch (er) { setErrFoto(er.message); }
-  };
   // Sube la foto (si hay) y devuelve los datos de la compra con su id.
   const conFoto = async () => ({ ...payload, fotoId: foto ? await subirFoto(foto) : null });
 
@@ -1755,17 +1907,10 @@ function CompraModal({ data, session, doc, onClose, onSave, onNuevoIngrediente }
           </Select>
         </Field>
 
-        {!editando && <Field label="Foto de la boleta o factura (opcional)">
-          {foto ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <img src={foto} alt="Vista previa del documento" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.line}` }} />
-              <Btn variant="ghost" onClick={() => setFoto(null)}>Quitar foto</Btn>
-            </div>
-          ) : (
-            <input type="file" accept="image/*" onChange={elegirFoto} aria-label="Foto de la boleta o factura" style={{ fontSize: 13 }} />
-          )}
-          {errFoto && <div style={{ color: C.brick, fontSize: 12, marginTop: 4 }}>{errFoto}</div>}
-        </Field>}
+        {!editando && <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.inkSoft, marginBottom: 4 }}>Foto de la boleta o factura (opcional)</div>
+          <FotoCampo foto={foto} onFoto={setFoto} etiqueta="Foto de la boleta o factura" />
+        </div>}
 
         {data.ingredientes.length === 0 ? (
           <div style={{ fontSize: 13, color: C.inkSoft }}>No tienes insumos creados. <button onClick={onNuevoIngrediente} style={{ color: C.caramel, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Crea uno primero</button>.</div>
@@ -1865,7 +2010,7 @@ function DocumentoModal({ compra, compras, onClose, onSave }) {
     try { const id = await subirFoto(nueva); await onSave(compra.id, id, aplicar && hermanas > 0); onClose(); } catch (er) { setErr(er.message); } finally { setCargando(false); }
   };
   return (
-    <Modal title={`Documento · ${compra.tipoDocumento}${compra.numero ? ` #${compra.numero}` : ""}`} onClose={onClose} wide>
+    <Modal title={`Documento · ${compra.tipoDocumento || "Gasto"}${compra.numero ? ` #${compra.numero}` : ""}`} onClose={onClose} wide>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {compra.fotoId && !nueva && (
           fallo ? <div style={{ fontSize: 13, color: C.brick }}>No se pudo cargar la foto.</div> : (
@@ -1876,7 +2021,7 @@ function DocumentoModal({ compra, compras, onClose, onSave }) {
         )}
         {nueva && <img src={nueva} alt="Vista previa de la nueva foto" style={{ width: "100%", maxHeight: "60vh", objectFit: "contain", borderRadius: 8, border: `1px solid ${C.line}`, background: "#fff" }} />}
         {!compra.fotoId && !nueva && <div style={{ fontSize: 13, color: C.inkSoft }}>Esta compra aún no tiene foto del documento.</div>}
-        {!nueva && <input type="file" accept="image/*" onChange={elegir} aria-label="Elegir foto del documento" style={{ fontSize: 13 }} />}
+        {!nueva && <FotoCampo foto={null} onFoto={setNueva} etiqueta="Foto del documento" />}
         {hermanas > 0 && (
           <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={aplicar} onChange={(e) => setAplicar(e.target.checked)} />
@@ -1896,11 +2041,11 @@ function DocumentoModal({ compra, compras, onClose, onSave }) {
 }
 
 /* ---------------- AJUSTE DE INVENTARIO ---------------- */
-const CATEGORIAS_AJUSTE = ["Merma", "Daño", "Conteo físico", "Otro"];
+const CATEGORIAS_AJUSTE = ["Rotura", "Pérdida", "Merma", "Daño", "Conteo físico", "Otro"];
 
-function AjusteModal({ tipo, refId, nombre, unidadBase, lote, stockActual, onClose, onSave }) {
+function AjusteModal({ tipo, refId, nombre, unidadBase, lote, stockActual, precioRef, onClose, onSave }) {
   const tienePesoEnvase = tipo === "lote" && lote?.pesoEnvase != null;
-  const [f, setF] = useState({ fecha: hoy(), categoria: "Conteo físico", signo: "restar", cantidad: "", nota: "", modoEnvase: tienePesoEnvase, pesoTotalPesado: "" });
+  const [f, setF] = useState({ fecha: hoy(), categoria: tipo === "articulo" ? "Rotura" : "Conteo físico", signo: "restar", cantidad: "", nota: "", modoEnvase: tienePesoEnvase, pesoTotalPesado: "" });
   const enModoEnvase = f.modoEnvase && tienePesoEnvase;
 
   const pesoNeto = tienePesoEnvase ? parseNum(f.pesoTotalPesado) - Number(lote.pesoEnvase) : null;
@@ -1947,6 +2092,7 @@ function AjusteModal({ tipo, refId, nombre, unidadBase, lote, stockActual, onClo
               </Select>
             </Field>
             <Field label={`Cantidad (${unidadBase})`} v={v} campo="cantidad"><NumInput value={f.cantidad} onChange={(e) => setF({ ...f, cantidad: e.target.value })} /></Field>
+            {precioRef != null && parseNum(f.cantidad) > 0 && <div style={{ fontSize: 12.5, color: C.inkSoft }}>Último precio: {clpU(precioRef)} c/u · valor aproximado: <b style={{ color: C.ink }}>{clp(precioRef * parseNum(f.cantidad))}</b></div>}
           </>
         )}
 
@@ -1992,6 +2138,14 @@ function construirMovimientos(data, tipo, refId) {
       });
     }));
     agregarVentas("ingrediente");
+  } else if (tipo === "articulo") {
+    (data.gastos || []).filter((g) => g.articuloId === refId && Number(g.cantidad) > 0).forEach((g) => {
+      movs.push({
+        id: `g${g.id}`, fecha: g.fecha, rango: 0, clase: "compra",
+        titulo: `Compra${g.tipoDocumento ? ` · ${g.tipoDocumento}${g.numero ? ` ${g.numero}` : ""}` : ""}${g.marca ? ` · ${g.marca}` : ""}`,
+        detalle: `${fmtNum(g.cantidad)} und por ${clp(g.monto)} (${clpU(g.monto / g.cantidad)} c/u)`, cantidad: Number(g.cantidad),
+      });
+    });
   } else {
     const pr = data.producciones.find((p) => p.id === refId);
     if (pr) {
@@ -2024,6 +2178,40 @@ function resumenMovimientos(movs) {
   return r;
 }
 
+// Precios por unidad de un artículo (ej. tapers) según lo que costaron sus compras.
+function preciosArticulo(data, articuloId) {
+  const compras = (data.gastos || []).filter((g) => g.articuloId === articuloId && Number(g.cantidad) > 0)
+    .map((g) => ({ ...g, unitario: Number(g.monto) / Number(g.cantidad) }))
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  if (compras.length === 0) return { compras, ultimo: null, minimo: null, promedio: null };
+  const cant = compras.reduce((s, g) => s + Number(g.cantidad), 0);
+  const monto = compras.reduce((s, g) => s + Number(g.monto), 0);
+  return { compras, ultimo: compras[compras.length - 1].unitario, minimo: Math.min(...compras.map((g) => g.unitario)), promedio: monto / cant };
+}
+function HistorialPrecios({ data, articuloId }) {
+  const p = preciosArticulo(data, articuloId);
+  if (p.compras.length === 0) return null;
+  const dato = (t, v) => (<Card style={{ padding: 10, flex: 1, minWidth: 0 }}><div style={{ fontSize: 12, color: C.inkSoft }}>{t}</div><div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>{clpU(v)}</div></Card>);
+  const mejor = p.minimo;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>Precio por unidad</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>{dato("Último", p.ultimo)}{dato("Más barato", p.minimo)}{dato("Promedio", p.promedio)}</div>
+      <Card style={{ padding: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Compras anteriores (para comparar)</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...p.compras].reverse().map((g) => (
+            <div key={g.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
+              <span>{g.fecha}{g.marca ? ` · ${g.marca}` : ""} · {fmtNum(g.cantidad)} und <span style={{ color: C.inkSoft }}>({g.tipoDocumento || "gasto"}{g.numero ? ` ${g.numero}` : ""})</span></span>
+              <span style={{ fontWeight: 600, color: g.unitario === mejor ? C.sage : C.ink, whiteSpace: "nowrap" }}>{clpU(g.unitario)} c/u{g.unitario === mejor ? " ✓" : ""}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 const ETIQUETA_MOV = {
   compra: { texto: "Compra", color: C.sage, fondo: C.sageBg },
   produccion: { texto: "Producción", color: C.sage, fondo: C.sageBg },
@@ -2041,6 +2229,7 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
     const r = {};
     data.ingredientes.forEach((i) => { r[`ingrediente:${i.id}`] = resumenMovimientos(construirMovimientos(data, "ingrediente", i.id)); });
     data.producciones.forEach((p) => { r[`lote:${p.id}`] = resumenMovimientos(construirMovimientos(data, "lote", p.id)); });
+    (data.articulos || []).forEach((a) => { r[`articulo:${a.id}`] = resumenMovimientos(construirMovimientos(data, "articulo", a.id)); });
     return r;
   }, [data]);
 
@@ -2048,7 +2237,12 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
   const recetaDe = (lote) => data.recetasBase.find((r) => r.id === lote.recetaBaseId);
   const nombreLote = (lote) => `${recetaDe(lote)?.nombre || "Receta base"} — lote ${lote.codigo || lote.fecha}`;
 
-  const modal = modalAjuste && (modalAjuste.tipo === "ingrediente" ? (
+  const modal = modalAjuste && (modalAjuste.tipo === "articulo" ? (
+    <AjusteModal
+      tipo="articulo" refId={modalAjuste.item.id} nombre={modalAjuste.item.nombre} unidadBase="unidad" precioRef={preciosArticulo(data, modalAjuste.item.id).ultimo}
+      onClose={() => setModalAjuste(null)} onSave={async (a) => { await guardarAjuste(a); setModalAjuste(null); }}
+    />
+  ) : modalAjuste.tipo === "ingrediente" ? (
     <AjusteModal
       tipo="ingrediente" refId={modalAjuste.item.id} nombre={modalAjuste.item.nombre} unidadBase={baseUnidadDe(modalAjuste.item.unidad)}
       onClose={() => setModalAjuste(null)} onSave={async (a) => { await guardarAjuste(a); setModalAjuste(null); }}
@@ -2062,16 +2256,18 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
   ));
 
   // Detalle de un insumo o de un lote
-  const itemAbierto = abierto && (abierto.tipo === "ingrediente" ? data.ingredientes.find((i) => i.id === abierto.id) : data.producciones.find((p) => p.id === abierto.id));
+  const itemAbierto = abierto && (abierto.tipo === "ingrediente" ? data.ingredientes.find((i) => i.id === abierto.id) : abierto.tipo === "articulo" ? (data.articulos || []).find((a) => a.id === abierto.id) : data.producciones.find((p) => p.id === abierto.id));
   if (abierto && itemAbierto) {
     const esInsumo = abierto.tipo === "ingrediente";
+    const esArt = abierto.tipo === "articulo";
     return (
       <>
         <DetalleMovimientos
           data={data} tipo={abierto.tipo} refId={abierto.id}
-          titulo={esInsumo ? itemAbierto.nombre : nombreLote(itemAbierto)}
-          unidad={baseUnidadDe(esInsumo ? itemAbierto.unidad : itemAbierto.unidadRendimiento)}
-          stockActual={esInsumo ? stock.stockIngrediente(itemAbierto.id) : stock.stockLote(itemAbierto)}
+          titulo={esInsumo || esArt ? itemAbierto.nombre : nombreLote(itemAbierto)}
+          unidad={esArt ? "unidad" : baseUnidadDe(esInsumo ? itemAbierto.unidad : itemAbierto.unidadRendimiento)}
+          stockActual={esArt ? (resumenes[`articulo:${abierto.id}`]?.saldo || 0) : esInsumo ? stock.stockIngrediente(itemAbierto.id) : stock.stockLote(itemAbierto)}
+          extra={esArt ? <HistorialPrecios data={data} articuloId={abierto.id} /> : null}
           onBack={() => setAbierto(null)} onAjustar={() => setModalAjuste({ tipo: abierto.tipo, item: itemAbierto })} eliminarAjuste={eliminarAjuste}
         />
         {modal}
@@ -2107,9 +2303,20 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
 
   return (
     <div style={{ paddingTop: 8 }}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>{pestana("insumos", "Insumos")}{pestana("lotes", "Lotes")}</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>{pestana("insumos", "Insumos")}{pestana("lotes", "Lotes")}{pestana("articulos", "Artículos")}</div>
 
-      {vista === "insumos" ? (
+      {vista === "articulos" ? (
+        (data.articulos || []).length === 0 ? (
+          <EmptyState icon={Package} title="Sin artículos aún" desc="Se crean solos al registrar un gasto operativo de la categoría “Artículos y equipo” (por ejemplo, tapers)." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {data.articulos.map((a) => {
+              const pr = preciosArticulo(data, a.id);
+              return fila({ clave: a.id, titulo: a.nombre, sub: pr.ultimo != null ? `Último precio ${clpU(pr.ultimo)} · mínimo ${clpU(pr.minimo)}` : null, tipo: "articulo", item: a, unidad: "unidad", stockActual: resumenes[`articulo:${a.id}`]?.saldo || 0 });
+            })}
+          </div>
+        )
+      ) : vista === "insumos" ? (
         data.ingredientes.length === 0 ? (
           <EmptyState icon={Layers} title="Sin insumos aún" />
         ) : (
@@ -2142,7 +2349,7 @@ function Stock({ data, stock, guardarAjuste, eliminarAjuste }) {
   );
 }
 
-function DetalleMovimientos({ data, tipo, refId, titulo, unidad, stockActual, onBack, onAjustar, eliminarAjuste }) {
+function DetalleMovimientos({ data, tipo, refId, titulo, unidad, stockActual, onBack, onAjustar, eliminarAjuste, extra }) {
   const [filtro, setFiltro] = useState("todo");
   const movs = useMemo(() => construirMovimientos(data, tipo, refId), [data, tipo, refId]);
   const r = useMemo(() => resumenMovimientos(movs), [movs]);
@@ -2188,10 +2395,11 @@ function DetalleMovimientos({ data, tipo, refId, titulo, unidad, stockActual, on
         {dato("Saldo", r.saldo, r.saldo < 0 ? C.brick : C.ink)}
       </div>
 
+      {extra}
       <Card style={{ padding: 12, marginBottom: 14 }}>
         <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 8 }}>¿A dónde fue?</div>
         {r.salidas <= 0 ? (
-          <div style={{ fontSize: 13, color: C.inkSoft }}>Aún no ha salido nada de {esInsumo ? "este insumo" : "este lote"}.</div>
+          <div style={{ fontSize: 13, color: C.inkSoft }}>Aún no ha salido nada de {esInsumo ? "este insumo" : tipo === "articulo" ? "este artículo" : "este lote"}.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {destinos.map((d) => (
