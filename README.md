@@ -116,3 +116,12 @@ La base de datos es SQLite alojada en **Turso** (gratis), así que la app corre 
 Sin esas variables, la app usa el archivo local `data.sqlite` (desarrollo). El `Dockerfile` sigue disponible como alternativa con disco propio.
 
 - **Historial de precios para todos los ítems**: en Stock (Insumos y Artículos) y en Compras (botón «precios» por insumo) se ve último precio, más barato, promedio, comparación por marca y compras anteriores.
+
+- **Sección Caja** (menú aparte): saldo de hoy, caja por mes, conciliación con el banco, saldo de apertura y **ajuste único de caja** (ingreso/egreso que cuadra con el banco en una fecha; no cuenta como venta ni gasto).
+
+## Rendimiento
+- Base de datos: 21 índices (esquema v12) y lectura de todos los datos en paralelo y agrupada en una pasada (con 4 000 ventas: 1.75 s → 0.4 s, resultado idéntico).
+- Listas con «Mostrar más» (40 por tanda) en Clientes, Compras, Gastos y Ventas; búsqueda de clientes con retraso de 250 ms.
+- Código separado en `app/comun.js` (utilidades e interfaz), `app/Principal.js` (app) y `app/Admin.js` (Usuarios y Auditoría, se descarga solo al abrirlos).
+- Logo en WebP (22 KB → 2.6 KB), imágenes de boletas con carga diferida, fotos y logo con caché del navegador, esqueletos de carga.
+- Balanceador, CDN y compresión (gzip/brotli) los da Vercel; los datos de la API no se guardan en caché a propósito.

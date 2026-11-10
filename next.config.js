@@ -14,7 +14,9 @@ const nextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: cabeceras },
-      { source: "/api/:path*", headers: [{ key: "Cache-Control", value: "no-store" }] },
+      // Los datos de la API cambian en cada operación: nunca se guardan en caché. Las fotos (por id, no cambian) sí las cachea el navegador.
+      { source: "/api/((?!fotos).*)", headers: [{ key: "Cache-Control", value: "no-store" }] },
+      { source: "/:file(logo-venu\\.(?:png|webp)|icon\\.png)", headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }] },
     ];
   },
 };
